@@ -40,7 +40,7 @@ docs/                  # End-user documentation
 There is no automated test suite for skill prose. Verify by:
 
 1. **Grep sanity**: skill bodies, agent skeletons, and docs should NOT contain `PAY-`, `@payroll-saas`, `packages/web/src/`, `npm -w`, or other repo-specific strings outside the `<!-- EXAMPLE -->` blocks and `.example` files.
-2. **Local install smoke test**: from a separate test repo, `claude /plugin marketplace add file:///path/to/this/repo` then `claude /plugin install feature-flow@feature-flow-marketplace`. Confirm `/feature` resolves and all six skills + two agents appear.
+2. **Local install smoke test**: from a separate test repo, `claude plugin marketplace add file:///path/to/this/repo` then `claude plugin install feature-flow@feature-flow-marketplace`. Confirm `/feature` resolves and all six skills + two agents appear.
 3. **Dry-run a real ticket** in a consuming project that has the plugin installed.
 
 ## Common edits

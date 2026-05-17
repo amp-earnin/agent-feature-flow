@@ -27,7 +27,7 @@ The plugin's `pr-review-orchestrator` skill assumes two additional reviewers exi
 - `agent-skills:code-reviewer` (for the `[correctness]` lane)
 - `agent-skills:security-auditor` (for the `[security]` lane)
 
-These come from the `addyosmani/agent-skills` plugin (`/plugin marketplace add addyosmani/agent-skills`). If you have a different set of base agents, override `pr-review-orchestrator/SKILL.md` at the project scope and adjust the reviewer table.
+These come from the `addyosmani/agent-skills` plugin (`claude plugin marketplace add addyosmani/agent-skills`). If you have a different set of base agents, override `pr-review-orchestrator/SKILL.md` at the project scope and adjust the reviewer table.
 
 ## Authoring custom agents
 

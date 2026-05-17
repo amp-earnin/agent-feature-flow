@@ -35,8 +35,8 @@
 ## Install
 
 ```bash
-/plugin marketplace add amp-earnin/agent-feature-flow
-/plugin install feature-flow@feature-flow-marketplace
+claude plugin marketplace add amp-earnin/agent-feature-flow
+claude plugin install feature-flow@feature-flow-marketplace
 ```
 
 After install, complete the [consumer setup checklist](./references/consumer-setup-checklist.md):
@@ -99,7 +99,7 @@ $EDITOR .claude/features/ABC-1234/brief.md
 - A tracker MCP server authenticated in your Claude Code config:
   - JIRA: Atlassian Rovo
   - Linear / Shortcut / GitHub Issues / etc.: their respective MCPs
-- The `addyosmani/agent-skills` plugin (for `code-reviewer`, `security-auditor`, and `planning-and-task-breakdown` skills). Install with `/plugin marketplace add addyosmani/agent-skills`. Optional but recommended.
+- The `addyosmani/agent-skills` plugin (for `code-reviewer`, `security-auditor`, and `planning-and-task-breakdown` skills). Install with `claude plugin marketplace add addyosmani/agent-skills`. Optional but recommended.
 - A repo with `gh` CLI configured (for PR operations).
 
 Optional MCPs that improve the brief:
