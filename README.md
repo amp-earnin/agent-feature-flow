@@ -57,11 +57,32 @@ After setup:
 
 The conductor will run Stage 1, then pause for your approval. From there, approve the brief and let the workflow run.
 
+### Run a single stage
+
+Each stage has its own command. By default it runs **only that stage** and stops; pass `--continue` to run that stage plus everything downstream.
+
+| Command                       | Enters at      | Requires                  |
+| ----------------------------- | -------------- | ------------------------- |
+| `/feature-brief ABC-1234`     | gather + brief | nothing (fresh start)     |
+| `/feature-plan ABC-1234`      | plan           | `brief.md`                |
+| `/feature-implement ABC-1234` | implement      | `brief.md` + `tasks.md`   |
+| `/feature-pr ABC-1234`        | open PR        | feature branch w/ commits |
+| `/feature-review ABC-1234`    | review loop    | open PR                   |
+
+If a prerequisite is missing, the command fails with instructions — it does NOT auto-run upstream stages. Write the artifact yourself or run the upstream command. Per-ticket artifacts live in `.claude/features/<TICKET>/`.
+
+Example — write your own brief, then jump straight into planning + everything downstream:
+
+```bash
+$EDITOR .claude/features/ABC-1234/brief.md
+/feature-plan ABC-1234 --continue
+```
+
 ## What ships in this plugin
 
 | Component                  | Path                                                                                                                                                                                  |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Slash command              | `.claude/commands/feature.md`                                                                                                                                                         |
+| Slash commands             | `.claude/commands/feature.md` (full pipeline) + `feature-brief.md`, `feature-plan.md`, `feature-implement.md`, `feature-pr.md`, `feature-review.md` (per-stage)                       |
 | Conductor + 5 stage skills | `skills/feature-flow-conductor/`, `skills/gather-requirements/`, `skills/feature-brief-author/`, `skills/verify-architecture/`, `skills/pr-review-orchestrator/`, `skills/pr-triage/` |
 | Meta-skill (discovery)     | `skills/using-feature-flow/SKILL.md`                                                                                                                                                  |
 | Review team personas       | `agents/architecture-reviewer.md`, `agents/frontend-ux-reviewer.md` (skeletons — override per project)                                                                                |

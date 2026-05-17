@@ -27,6 +27,32 @@ Two human checkpoints: after the **brief** is generated (Stage 1), and before **
 
 State is persisted to `.claude/features/<TICKET>/state.json` (schema: `${CLAUDE_PLUGIN_ROOT}/references/state-schema.json`) so the workflow can be paused at any point and resumed by re-running `/feature <TICKET>`.
 
+## Running a single stage
+
+Sometimes you don't want the full pipeline. Maybe you wrote the brief yourself and just want planning to run, or maybe Stage 3 finished a week ago and you only want to re-open the PR. Each stage has its own slash command:
+
+| Command                       | Enters at      | Default behavior                                                  |
+| ----------------------------- | -------------- | ----------------------------------------------------------------- |
+| `/feature-brief <TICKET>`     | gather + brief | runs Stage 1, stops at human checkpoint 1                         |
+| `/feature-plan <TICKET>`      | plan           | runs Stage 2 only — requires `brief.md`                           |
+| `/feature-implement <TICKET>` | implement      | runs Stage 3 only — requires `brief.md` + `tasks.md`              |
+| `/feature-pr <TICKET>`        | open PR        | runs Stage 4 only — requires a feature branch with commits        |
+| `/feature-review <TICKET>`    | review loop    | runs Stage 5 + checkpoint 2 — requires an open PR for this ticket |
+
+**Default is "only this stage."** Pass `--continue` to run that stage and everything downstream:
+
+```bash
+/feature-plan ABC-1234            # plan, then stop
+/feature-plan ABC-1234 --continue # plan + implement + PR + review, like /feature did from this point
+```
+
+If a prerequisite is missing the command **fails with instructions** — it does not auto-run upstream stages. You can supply the missing artifact two ways:
+
+- run the upstream command (`/feature-brief`, `/feature-plan`, etc.), or
+- write the file yourself at `.claude/features/<TICKET>/<file>.md` and re-run
+
+The conductor seeds `state.json` based on which artifacts it finds on disk, so writing a brief by hand and jumping to `/feature-plan` works the same as running both commands in sequence.
+
 ## Prerequisites
 
 Before your first run, complete the steps in `${CLAUDE_PLUGIN_ROOT}/references/consumer-setup-checklist.md`. Most importantly:
@@ -114,7 +140,7 @@ Loop continues until `will-fix` is empty or `max_rounds` (default 5) is reached.
 
 Re-running `/feature <TICKET>` always resumes from the current stage in `state.json`. It will not redo a complete stage.
 
-To **force restart** of a stage, edit `.claude/features/<TICKET>/state.json` and set the relevant `stages.<name>.status` back to `"pending"`.
+To **force restart** of a stage, either edit `.claude/features/<TICKET>/state.json` and set the relevant `stages.<name>.status` back to `"pending"`, or run the per-stage command directly (e.g. `/feature-plan ABC-1234`) — entering with an explicit `start_stage` re-runs that stage and overwrites its asset.
 
 ## Troubleshooting
 

@@ -10,6 +10,8 @@ You are the orchestrator for a 6-stage feature workflow. You do not implement co
 ## Inputs
 
 - `TICKET`: a tracker ticket ID (JIRA-style by default, e.g. `ABC-1234`; configurable in `.claude/commands/feature.md`).
+- `start_stage` _(optional)_: one of `brief | plan | implement | pr | review_loop`. If omitted, resume from the stage recorded in `state.json` (or `brief` for a fresh run). Per-stage slash commands (`/feature-brief`, `/feature-plan`, etc.) pass this explicitly.
+- `mode` _(optional)_: `only` or `continue`. Default `continue` (run the start stage and all downstream stages — the original `/feature` behavior). `only` runs exactly one stage and returns control to the user. Per-stage commands default to `only`.
 
 ## Workspace
 
@@ -36,9 +38,27 @@ State schema (canonical JSON schema available at `${CLAUDE_PLUGIN_ROOT}/referenc
 
 `status` ∈ `pending | in_progress | complete | failed`.
 
+## Prerequisite seeding (for `start_stage` other than `brief`)
+
+When the user enters mid-pipeline, the conductor must verify the upstream artifacts exist on disk before dispatching. If they do, seed `state.json` (marking upstream stages `complete` and pointing `asset` at the file) so downstream stages can find them. If they do not, **fail with a clear message** — do not auto-run upstream stages.
+
+| `start_stage` | Required artifact(s)                                                                           | Failure message                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `plan`        | `.claude/features/<TICKET>/brief.md`                                                           | "No brief.md found at `<path>`. Either run `/feature-brief <TICKET>` first, or write the file yourself and re-run." |
+| `implement`   | `brief.md` + `.claude/features/<TICKET>/tasks.md`                                              | "Missing `<file>`. Run the upstream stage or write the file yourself."                                              |
+| `pr`          | A feature branch checked out with commits ahead of the base branch                             | "No feature branch with commits found. Run `/feature-implement` first or check out the branch manually."            |
+| `review_loop` | `state.json:pr.url` populated (or current branch has an open PR discoverable via `gh pr view`) | "No open PR found for this ticket. Run `/feature-pr` first or pass the PR URL via state.json."                      |
+
+When seeding succeeds, set the relevant `stages.<name>.status = "complete"` and `asset` fields, then proceed to the requested `start_stage`.
+
+## Mode handling
+
+- `mode = continue` (default): after each stage completes, proceed to the next one until the pipeline ends or a human checkpoint pauses it. This is the original `/feature` behavior.
+- `mode = only`: after the start stage completes, emit a one-line "Stage X complete. Next: `/feature-<next>` or `/feature-<TICKET> --continue` to chain." and stop. Do NOT run downstream stages. Do NOT prompt the human checkpoint for that stage unless the stage itself is a checkpoint (e.g. `brief` always ends at checkpoint 1 — in `only` mode, surface the checkpoint and stop regardless).
+
 ## Stages
 
-Run each stage **as a fresh-context subagent** via the `Agent` tool (`subagent_type: general-purpose` unless noted). Pass only the minimum the stage needs — never the whole conversation. After the subagent returns, read its result, update state.json, and only then proceed.
+Run each stage **as a fresh-context subagent** via the `Agent` tool (`subagent_type: general-purpose` unless noted). Pass only the minimum the stage needs — never the whole conversation. After the subagent returns, read its result, update state.json, and only then proceed (or stop, if `mode = only`).
 
 ### Stage 1 — gather + author brief (`brief`)
 
@@ -102,7 +122,7 @@ Notify the human (text output to the user) with the PR URL, round count, and the
 
 ## Behaviors
 
-- **Idempotent**: re-running the conductor reads state.json and resumes from the current stage. Never redo a `complete` stage.
+- **Idempotent**: re-running the conductor reads state.json and resumes from the current stage. Never redo a `complete` stage — unless the user explicitly entered with `start_stage` pointing at it, in which case treat the stage as a re-run and overwrite its `asset`.
 - **Token discipline**: never re-read source-of-truth artifacts that a prior stage already consumed. The brief is the canonical contract from Stage 2 onward.
 - **Failure transparency**: any stage failure pauses the loop and surfaces the error to the human verbatim. Don't paper over.
 - **No silent destructive ops**: branch deletion, force-push, rebase, etc. require human confirmation regardless of round.
