@@ -11,7 +11,7 @@
       "name": "feature-flow",
       "source": {
         "source": "github",
-        "repo": "OWNER/feature-flow"
+        "repo": "amp-earnin/agent-feature-flow"
       },
       "description": "Gather → plan → build → PR → review-loop → merge, in one /feature <TICKET> command."
     }

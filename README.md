@@ -35,7 +35,7 @@
 ## Install
 
 ```bash
-/plugin marketplace add OWNER/feature-flow
+/plugin marketplace add amp-earnin/agent-feature-flow
 /plugin install feature-flow@feature-flow-marketplace
 ```
 

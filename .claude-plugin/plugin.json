@@ -5,8 +5,8 @@
   "author": {
     "name": "Tassana Amp"
   },
-  "homepage": "https://github.com/OWNER/feature-flow",
-  "repository": "https://github.com/OWNER/feature-flow",
+  "homepage": "https://github.com/amp-earnin/agent-feature-flow",
+  "repository": "https://github.com/amp-earnin/agent-feature-flow",
   "license": "MIT",
   "commands": "./.claude/commands",
   "skills": "./skills",

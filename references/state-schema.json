@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/OWNER/feature-flow/references/state-schema.json",
+  "$id": "https://github.com/amp-earnin/agent-feature-flow/references/state-schema.json",
   "title": "Feature workflow state",
   "description": "Schema for .claude/features/<TICKET>/state.json, the durable progress record for a single feature workflow run.",
   "type": "object",
