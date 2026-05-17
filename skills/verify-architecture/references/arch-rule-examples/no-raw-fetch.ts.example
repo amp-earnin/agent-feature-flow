@@ -1,0 +1,130 @@
+#!/usr/bin/env tsx
+/**
+ * Architecture rule: no raw HTTP clients in app code — EXAMPLE
+ *
+ * This is a reference implementation for a project that funnels all HTTP
+ * through a generated client (e.g. openapi-typescript). Copy to your
+ * project's scripts/arch/ and adapt:
+ *
+ *   1. Change the scan glob and ALLOWED_PATH_PATTERNS to match your project.
+ *   2. Tune BANNED_PATTERNS for the HTTP libraries your project rejects.
+ *   3. Hook into your scripts/verify.sh.
+ *
+ * What it catches:
+ *   Raw `fetch()`, `axios`, `XMLHttpRequest`, or `new Request(` calls
+ *   outside the allowed data-fetching layer. Raw HTTP bypasses caching,
+ *   error handling, and type guarantees from your generated client.
+ *
+ * CLI:
+ *   npx tsx scripts/arch/no-raw-fetch.ts [--format=text|json]
+ *
+ * Exit codes: 0 = pass, 1 = violations found.
+ */
+import fg from "fast-glob"
+import { readFileSync } from "node:fs"
+import { relative, resolve } from "node:path"
+
+const REPO_ROOT = resolve(import.meta.dirname, "..", "..")
+
+// CUSTOMIZE: directories where raw HTTP is allowed (your data-fetching layer,
+// mock layer, test setup, etc.).
+const ALLOWED_PATH_PATTERNS = [
+  "packages/web/src/queries/",
+  "packages/web/src/mocks/",
+  "packages/web/src/setup",
+  "packages/web/src/shared/libs/",
+]
+
+// CUSTOMIZE: files where raw HTTP is allowed (tests, stories, configs).
+const ALLOWED_FILE_PATTERNS = [
+  /\.test\.(ts|tsx)$/,
+  /\.stories\.(ts|tsx)$/,
+  /vite\.config\.ts$/,
+  /vitest\.config\.ts$/,
+]
+
+// CUSTOMIZE: HTTP-client patterns this project rejects.
+const BANNED_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bfetch\s*\(/, label: "fetch(" },
+  { pattern: /\baxios\b/, label: "axios" },
+  { pattern: /\bnew\s+XMLHttpRequest\b/, label: "XMLHttpRequest" },
+  { pattern: /\bnew\s+Request\s*\(/, label: "new Request(" },
+]
+
+type Violation = {
+  file: string
+  line: number
+  match: string
+  text: string
+}
+
+const format = process.argv.find((a) => a.startsWith("--format="))?.split("=")[1] ?? "text"
+
+function isAllowed(relPath: string): boolean {
+  if (ALLOWED_PATH_PATTERNS.some((p) => relPath.startsWith(p))) return true
+  if (ALLOWED_FILE_PATTERNS.some((re) => re.test(relPath))) return true
+  return false
+}
+
+// CUSTOMIZE: scan glob for your project.
+const files = await fg("packages/web/src/**/*.{ts,tsx}", {
+  cwd: REPO_ROOT,
+  absolute: true,
+  ignore: ["**/node_modules/**", "**/*.d.ts"],
+})
+
+const violations: Violation[] = []
+
+for (const file of files) {
+  const rel = relative(REPO_ROOT, file)
+  if (isAllowed(rel)) continue
+
+  const src = readFileSync(file, "utf8")
+  const lines = src.split("\n")
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // Skip comments (cheap heuristic — full lint would AST-walk; this is OK at v1)
+    const trimmed = line.trimStart()
+    if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue
+
+    for (const { pattern, label } of BANNED_PATTERNS) {
+      if (pattern.test(line)) {
+        violations.push({
+          file: rel,
+          line: i + 1,
+          match: label,
+          text: line.trim().slice(0, 120),
+        })
+      }
+    }
+  }
+}
+
+if (format === "json") {
+  console.log(
+    JSON.stringify(
+      {
+        rule: "no-raw-fetch",
+        passed: violations.length === 0,
+        violations,
+      },
+      null,
+      2,
+    ),
+  )
+} else {
+  if (violations.length === 0) {
+    console.log("no-raw-fetch: ok")
+  } else {
+    console.log(`no-raw-fetch: ${violations.length} violation(s):`)
+    for (const v of violations) {
+      console.log(`  ${v.file}:${v.line}  [${v.match}]  ${v.text}`)
+    }
+    console.log("")
+    console.log("Fix: route the call through your project's generated client and compose with")
+    console.log("queryOptions() (or the equivalent) in your data-fetching layer.")
+  }
+}
+
+process.exit(violations.length === 0 ? 0 : 1)

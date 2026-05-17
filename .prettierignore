@@ -1,0 +1,13 @@
+node_modules/
+.tmp/
+tmp/
+*.log
+LICENSE
+
+# Example snippets ship with intentional shape — don't reformat them.
+*.example
+**/*.example
+
+# Shell scripts: use shfmt instead if you want formatting here.
+*.sh
+hooks/**/*.sh

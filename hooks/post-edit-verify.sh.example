@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# scripts/hook-post-edit.sh — EXAMPLE
+#
+# This is a reference implementation of a PostToolUse hook that runs
+# verify.sh --quick on each edited file. It is NOT auto-registered by
+# the feature-flow plugin; the consuming project wires it up in their
+# own .claude/settings.json (see ${CLAUDE_PLUGIN_ROOT}/references/consumer-setup-checklist.md).
+#
+# Copy this to your project (commonly scripts/hook-post-edit.sh) and
+# add the following to your project's .claude/settings.json:
+#
+#   {
+#     "hooks": {
+#       "PostToolUse": [
+#         {
+#           "matcher": "Edit|Write|NotebookEdit",
+#           "hooks": [
+#             { "type": "command", "command": "bash scripts/hook-post-edit.sh", "timeout": 30 }
+#           ]
+#         }
+#       ]
+#     }
+#   }
+#
+# WHAT TO CUSTOMIZE
+#   - The exclusion list in the `case "$FILE" in` block: add any project
+#     directories whose edits should NOT trigger verify (e.g. docs, build
+#     outputs, generated code).
+
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+FILE=$(node -e "
+const chunks = [];
+process.stdin.on('data', c => chunks.push(c));
+process.stdin.on('end', () => {
+  try {
+    const d = JSON.parse(Buffer.concat(chunks).toString());
+    console.log(d.tool_input?.file_path || '');
+  } catch (e) {
+    console.log('');
+  }
+});
+")
+
+if [[ -z "$FILE" ]]; then
+  exit 0
+fi
+
+# Only verify files inside the repo, excluding workflow infra.
+# CUSTOMIZE: extend this exclusion list with any paths whose edits
+# should NOT trigger verification.
+case "$FILE" in
+  "$REPO_ROOT"/.claude/*)  exit 0 ;;
+  "$REPO_ROOT"/scripts/*)  exit 0 ;;
+  "$REPO_ROOT"/docs/*)     exit 0 ;;
+  "$REPO_ROOT"/*)          ;;
+  *)                       exit 0 ;;
+esac
+
+bash "$REPO_ROOT/scripts/verify.sh" --quick --file "$FILE"

@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# scripts/verify.sh — EXAMPLE
+#
+# This is a reference implementation of the verify script contract that
+# the `verify-architecture` skill drives. Copy this to your project's
+# scripts/verify.sh and adapt the check list to your stack.
+#
+# WHAT TO CUSTOMIZE
+#   - The `run` calls in the "full mode" section. Replace npm commands
+#     with your stack's equivalents (pnpm, yarn, cargo, go, etc.).
+#   - The `--quick` mode commands at the bottom — typically lint + format
+#     on the changed file. Tune for fastest possible feedback.
+#   - The `--skip arch` branch and the arch rule paths if you have custom
+#     scripts/arch/*.{ts,py,sh} rules. If you don't have any yet, the
+#     architecture rules block can be deleted.
+#
+# CONTRACT (do not change)
+#   - Run with no args → full suite.
+#   - Run with `--quick --file <path>` → fast file-scoped subset.
+#   - Each check prints `▶ <name>` / `✓ <name>` / `✗ <name>`.
+#   - Final line is `✓ All verification checks passed` or `✗ Verification failed`.
+#   - Exit 0 if all pass, 1 if any fail.
+#
+# Usage:
+#   ./scripts/verify.sh                       # full suite
+#   ./scripts/verify.sh --quick --file <path> # fast file-scoped (hook)
+#   ./scripts/verify.sh --skip arch           # full minus architecture rules
+
+set -uo pipefail
+
+MODE="full"
+FILE=""
+SKIP=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --quick) MODE="quick"; shift ;;
+    --file)  FILE="$2"; shift 2 ;;
+    --skip)  SKIP="$2"; shift 2 ;;
+    -h|--help)
+      grep "^#" "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) echo "verify.sh: unknown arg '$1'" >&2; exit 2 ;;
+  esac
+done
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# ---------- quick mode (PostEdit hook) ----------
+if [[ "$MODE" == "quick" ]]; then
+  if [[ -z "$FILE" ]]; then
+    exit 0
+  fi
+  case "$FILE" in
+    *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs) ;;
+    *) exit 0 ;;
+  esac
+  if [[ ! -f "$FILE" ]]; then
+    exit 0
+  fi
+
+  failed=0
+  # CUSTOMIZE: your linter + formatter for a single file
+  npx --no -- eslint "$FILE" || failed=1
+  npx --no -- prettier --check "$FILE" || failed=1
+  exit $failed
+fi
+
+# ---------- full mode ----------
+exit_code=0
+run() {
+  local label="$1"; shift
+  echo ""
+  echo "▶ $label"
+  if "$@"; then
+    echo "✓ $label"
+  else
+    echo "✗ $label (above output shows what failed)"
+    exit_code=1
+  fi
+}
+
+# CUSTOMIZE: replace with your stack's commands.
+# Order: cheap fast checks first, slow checks last.
+run "TypeScript"     npm run typecheck
+run "ESLint"         npm run lint
+run "Prettier"       npm run prettier:check
+run "Unit tests"     npm run test:unit
+
+# CUSTOMIZE: add your project's custom architecture rules here.
+# See ${CLAUDE_PLUGIN_ROOT}/skills/verify-architecture/references/arch-rule-examples/
+# for examples you can adapt.
+if [[ "$SKIP" != "arch" ]]; then
+  # run "arch: my-rule"  npx tsx scripts/arch/my-rule.ts
+  : # no-op placeholder
+fi
+
+echo ""
+if [[ $exit_code -eq 0 ]]; then
+  echo "✓ All verification checks passed"
+else
+  echo "✗ Verification failed. Fix the issues above, then re-run scripts/verify.sh"
+fi
+
+exit $exit_code

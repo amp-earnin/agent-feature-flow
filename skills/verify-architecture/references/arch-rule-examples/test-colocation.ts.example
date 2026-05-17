@@ -1,0 +1,98 @@
+#!/usr/bin/env tsx
+/**
+ * Architecture rule: test colocation and naming — EXAMPLE
+ *
+ * This is a reference implementation for a project that prefers tests
+ * colocated next to source files with `.test.*` suffix. Copy to your
+ * project's scripts/arch/ and adapt:
+ *
+ *   1. Change SCAN_ROOTS to the directories you want to enforce in.
+ *   2. Adjust the disallowed patterns if your project's convention differs
+ *      (e.g. allow `.spec.*` instead, or require `__tests__/` instead).
+ *   3. Hook into your scripts/verify.sh.
+ *
+ * What it catches:
+ *   - `*.spec.{ts,tsx,js,jsx}` files (rename to .test.*).
+ *   - Files under `__tests__/` directories (move next to source).
+ *
+ * V1 scope: enforces only the naming and location rules above. A future
+ * iteration could add a "tests required for new components" check once
+ * baseline coverage exists.
+ *
+ * CLI:
+ *   npx tsx scripts/arch/test-colocation.ts [--format=text|json]
+ *
+ * Exit codes: 0 = pass, 1 = violations found.
+ */
+import fg from "fast-glob"
+import { relative, resolve } from "node:path"
+
+const REPO_ROOT = resolve(import.meta.dirname, "..", "..")
+
+// CUSTOMIZE: directories to enforce test conventions in.
+const SCAN_ROOTS = ["packages/web/src", "packages/api/src"]
+
+type Violation = {
+  file: string
+  rule: "spec-suffix" | "tests-dir"
+  message: string
+}
+
+const format = process.argv.find((a) => a.startsWith("--format="))?.split("=")[1] ?? "text"
+
+const violations: Violation[] = []
+
+for (const root of SCAN_ROOTS) {
+  // .spec.* files
+  const specs = await fg(`${root}/**/*.spec.{ts,tsx,js,jsx}`, {
+    cwd: REPO_ROOT,
+    ignore: ["**/node_modules/**"],
+  })
+  for (const f of specs) {
+    violations.push({
+      file: f,
+      rule: "spec-suffix",
+      message: "Rename to .test.{ts,tsx} (no .spec.* allowed).",
+    })
+  }
+
+  // __tests__/ directories
+  const inTestsDir = await fg(`${root}/**/__tests__/**/*.{ts,tsx,js,jsx}`, {
+    cwd: REPO_ROOT,
+    ignore: ["**/node_modules/**"],
+  })
+  for (const f of inTestsDir) {
+    violations.push({
+      file: f,
+      rule: "tests-dir",
+      message: "Move test next to source file as <Name>.test.{ts,tsx} (no __tests__/ dirs).",
+    })
+  }
+}
+
+const unique = Array.from(new Map(violations.map((v) => [`${v.file}|${v.rule}`, v])).values())
+
+if (format === "json") {
+  console.log(
+    JSON.stringify(
+      {
+        rule: "test-colocation",
+        passed: unique.length === 0,
+        violations: unique.map((v) => ({ ...v, file: relative(REPO_ROOT, v.file) })),
+      },
+      null,
+      2,
+    ),
+  )
+} else {
+  if (unique.length === 0) {
+    console.log("test-colocation: ok")
+  } else {
+    console.log(`test-colocation: ${unique.length} violation(s):`)
+    for (const v of unique) {
+      console.log(`  ${relative(REPO_ROOT, v.file)}  [${v.rule}]  ${v.message}`)
+    }
+  }
+}
+
+process.exit(unique.length === 0 ? 0 : 1)

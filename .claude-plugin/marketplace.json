@@ -1,0 +1,19 @@
+{
+  "name": "feature-flow-marketplace",
+  "owner": {
+    "name": "Tassana Amp"
+  },
+  "metadata": {
+    "description": "End-to-end agentic feature workflow for Claude Code: a /feature <TICKET> slash command that orchestrates requirements gathering, planning, implementation, and a parallel-reviewer PR loop — with two human checkpoints."
+  },
+  "plugins": [
+    {
+      "name": "feature-flow",
+      "source": {
+        "source": "github",
+        "repo": "OWNER/feature-flow"
+      },
+      "description": "Gather → plan → build → PR → review-loop → merge, in one /feature <TICKET> command."
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OWNER/feature-flow/references/state-schema.json",
+  "title": "Feature workflow state",
+  "description": "Schema for .claude/features/<TICKET>/state.json, the durable progress record for a single feature workflow run.",
+  "type": "object",
+  "required": ["ticket", "stage", "stages"],
+  "properties": {
+    "ticket": {
+      "type": "string",
+      "description": "Tracker ticket ID, e.g. ABC-1234. Pattern is configurable per project in .claude/commands/feature.md."
+    },
+    "branch": {
+      "type": ["string", "null"],
+      "description": "Git branch created in Stage 3. Null before implementation begins."
+    },
+    "stage": {
+      "type": "string",
+      "enum": ["brief", "plan", "implement", "pr", "review_loop", "merged"],
+      "description": "Current stage. Workflow resumes from here on re-invocation."
+    },
+    "stages": {
+      "type": "object",
+      "required": ["brief", "plan", "implement", "pr", "review_loop"],
+      "properties": {
+        "brief": { "$ref": "#/$defs/stageWithAsset" },
+        "plan": { "$ref": "#/$defs/stageWithAsset" },
+        "implement": {
+          "type": "object",
+          "properties": {
+            "status": { "$ref": "#/$defs/status" },
+            "tasks_completed": { "type": "integer", "minimum": 0 },
+            "tasks_total": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["status"]
+        },
+        "pr": {
+          "type": "object",
+          "properties": {
+            "status": { "$ref": "#/$defs/status" },
+            "url": { "type": ["string", "null"], "format": "uri" },
+            "number": { "type": ["integer", "null"] }
+          },
+          "required": ["status"]
+        },
+        "review_loop": {
+          "type": "object",
+          "properties": {
+            "status": { "$ref": "#/$defs/status" },
+            "round": { "type": "integer", "minimum": 0 },
+            "max_rounds": { "type": "integer", "minimum": 1, "default": 5 },
+            "rounds": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/round" }
+            }
+          },
+          "required": ["status", "round", "max_rounds", "rounds"]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "status": {
+      "type": "string",
+      "enum": ["pending", "in_progress", "complete", "failed", "needs_human"]
+    },
+    "stageWithAsset": {
+      "type": "object",
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "asset": {
+          "type": ["string", "null"],
+          "description": "Path to the stage's output artifact (brief.md, tasks.md, etc.)."
+        }
+      },
+      "required": ["status"]
+    },
+    "round": {
+      "type": "object",
+      "properties": {
+        "round": { "type": "integer", "minimum": 1 },
+        "reviewers": {
+          "type": "object",
+          "properties": {
+            "correctness": { "type": "string" },
+            "architecture": { "type": "string" },
+            "security": { "type": "string" },
+            "ux": { "type": "string" }
+          }
+        },
+        "comments_posted_at": { "type": "string", "format": "date-time" },
+        "triage": {
+          "type": "object",
+          "properties": {
+            "will_fix": { "type": "array" },
+            "wont_fix": { "type": "array" },
+            "later": { "type": "array" }
+          }
+        }
+      },
+      "required": ["round"]
+    }
+  }
+}
