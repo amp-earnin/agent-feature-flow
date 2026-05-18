@@ -29,31 +29,32 @@ You spawn the parallel review team for the open PR and ensure all four reviewers
   - Ticket mode (`TICKET` set): `<WS>/brief.md`. Abort if missing.
   - PR-only mode (`PR_WORKSPACE` set): `<WS>/pr-context.md`. Abort if missing.
 - If in PR-only mode, also read the per-run nonce from the context document's fence marker (`<!-- pr-untrusted-<NONCE>:start -->`) so it can be passed to reviewers in the spawn prompt.
-- **Fetch resolved review threads from prior rounds** for fix-verification (round 2+ only — round 1 has nothing to verify):
+- **Fetch ALL review threads, paginated** — this runs **every round**, including round 1, because downstream skills (pr-triage's thread_id validation, the fix subagent's allowlist check) need a complete `valid_thread_ids` from the very first round. A long-running PR can accumulate >100 threads; the GraphQL page size is at most 100, so paginate explicitly:
 
   ```bash
-  gh api graphql -f query='
-    query($owner:String!, $repo:String!, $pr:Int!) {
-      repository(owner:$owner, name:$repo) {
-        pullRequest(number:$pr) {
-          reviewThreads(first:100) {
-            nodes {
-              id
-              isResolved
-              comments(first:1) {
-                nodes { databaseId body path line }
-              }
-            }
+  cursor=""
+  : > /tmp/pr-<PR>-r<ROUND>-threads.json
+  while :; do
+    page=$(gh api graphql -f query='
+      query($owner:String!,$repo:String!,$pr:Int!,$after:String){
+        repository(owner:$owner,name:$repo){pullRequest(number:$pr){
+          reviewThreads(first:100, after:$after){
+            pageInfo{hasNextPage endCursor}
+            nodes{id isResolved comments(first:1){nodes{databaseId body path line}}}
           }
-        }
+        }}
       }
-    }
-  ' -f owner=<owner> -f repo=<repo> -F pr=<PR_NUMBER> > /tmp/pr-<PR>-r<ROUND>-threads.json
+    ' -f owner=<owner> -f repo=<repo> -F pr=<PR_NUMBER> ${cursor:+-f after="$cursor"})
+    echo "$page" >> /tmp/pr-<PR>-r<ROUND>-threads.json
+    has_next=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+    [ "$has_next" = "true" ] || break
+    cursor=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+  done
   ```
 
-  For each resolved thread, parse the first comment's body for its lane tag (`[correctness]`, `[arch]`, `[security]`, `[ux]`). Partition into per-lane lists `resolved_threads[lane] = [{thread_id, comment_id, path, line, body}]`. These will be passed to the matching reviewer for verification (see step 2). Unresolved threads are not the reviewer's concern — triage either left them alone (won't-fix / later) or they're in flight.
+  **Populate the thread-id allowlist**: write the full list of thread node IDs from all pages (resolved or not) to `<WS>/state.json:review_loop.valid_thread_ids`. Downstream skills (reviewer Step A, pr-triage, fix subagent) validate every `thread_id` against this allowlist before issuing any GraphQL mutation, so a compromised subagent emitting a thread ID from an unrelated PR cannot mutate it. The same query result also populates the per-lane resolved-threads partition below.
 
-  **Populate the thread-id allowlist**: write the full list of thread node IDs from this query (resolved or not) to `<WS>/state.json:review_loop.valid_thread_ids`. Downstream skills (reviewer Step A, pr-triage, fix subagent) validate every `thread_id` against this allowlist before issuing any GraphQL mutation, so a compromised subagent emitting a thread ID from an unrelated PR cannot mutate it.
+- **Partition resolved threads by lane for Step A** — only relevant when prior rounds exist (`state.json:review_loop.rounds.length > 0`). On round 1 this list is empty and Step A is a no-op for every lane. For each thread where `isResolved === true`, parse the first comment's body for its lane tag (`[correctness]`, `[arch]`, `[security]`, `[ux]`) and append to `resolved_threads[lane] = [{thread_id, comment_id, path, line, body}]`. These will be passed to the matching reviewer (see step 2). Unresolved threads are not the reviewer's concern.
 
 ### 2. Spawn the 4-agent review team in parallel
 
@@ -85,21 +86,28 @@ Prompt structure for each reviewer (substitute the lane-specific guidance):
 >
 > 3. Decide whether the fix described in the original comment is present and adequate at `path:line` (the line number may have shifted; read a small window around it).
 > 4. **If the fix is good**: do nothing. Leave the thread resolved.
-> 5. **If the fix is missing, partial, or wrong**: post the reply FIRST, then unresolve. The reply-first ordering is critical — if the reply fails for any reason (network, rate limit, 422), the thread stays resolved and we don't get into a state where a thread is unresolved but the next round's triage cannot find a verification-failure marker on it.
+> 5. **If the fix is missing, partial, or wrong**: post the reply FIRST, then unresolve. Both calls must be guarded against failure to avoid a stuck state:
 >
 >    ```bash
->    # Reply first
->    gh api -X POST repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments/<comment_id>/replies \
->      -f body="[<lane>] Fix from round <PRIOR_ROUND> not landed (re-review at round <ROUND>): <1-2 sentences on what is still wrong>" \
->      || { echo "Reply failed; leaving thread resolved to keep state consistent"; continue; }
+>    # Step 5a — reply first. If this fails, leave the thread resolved (consistent state) and continue to the next thread.
+>    if ! gh api -X POST repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments/<comment_id>/replies \
+>           -f body="[<lane>] Fix from round <PRIOR_ROUND> not landed (re-review at round <ROUND>): <1-2 sentences on what is still wrong>"; then
+>      echo "Reply failed; leaving thread resolved. Will retry next round."
+>      continue
+>    fi
 >
->    # Only if reply succeeded, unresolve
->    gh api graphql -f query='mutation($id:ID!){unresolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=<thread_id>
+>    # Step 5b — unresolve. If THIS fails, the thread stays resolved but a "not landed" reply is on it.
+>    # That state would loop forever: next round's triage drops resolved-thread comments, so the
+>    # reply is never re-triaged, Step A keeps deciding the fix is missing, and the cycle repeats.
+>    # Escalate by posting a separate issue-level comment that survives the resolved-thread filter:
+>    if ! gh api graphql -f query='mutation($id:ID!){unresolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=<thread_id>; then
+>      gh pr comment <PR_NUMBER> --body "[<lane>] Manual action needed (round <ROUND>): unresolveReviewThread failed for thread <thread_id> after the 'not landed' reply was posted. Please unresolve this thread manually, or the fix loop cannot make progress on it."
+>    fi
 >    ```
 >
 >    `<PRIOR_ROUND>` is the round in which the will-fix was originally applied (the reviewer can find this in the original comment's reply chain — the `[will-fix] ... Commit X` reply). The reword from "Fix verification failed" avoids collision with this codebase's existing meaning of "verify" (which refers to `scripts/verify.sh`).
 >
->    The reply will be picked up by this round's triage as a normal finding (filed against the original comment thread), so it flows through the same will-fix loop.
+>    The "not landed" reply will be picked up by this round's triage as a normal finding (filed against the original comment thread), so it flows through the same will-fix loop. The escalation comment in the unresolve-failure path is the only durable signal a human reviewer would see for a stuck thread.
 >
 > **Step B — find new issues** in your lane in the diff. Do not comment on other lanes' concerns. In PR-only mode, do not flag missing-brief or scope-ambiguity issues — assume the PR's stated scope is the truth.
 >
