@@ -9,13 +9,16 @@ You are the orchestrator for a 6-stage feature workflow. You do not implement co
 
 ## Inputs
 
-- `TICKET`: a tracker ticket ID (JIRA-style by default, e.g. `ABC-1234`; configurable in `.claude/commands/feature.md`).
+- `TICKET`: a tracker ticket ID (JIRA-style by default, e.g. `ABC-1234`; configurable in `.claude/commands/feature.md`). Optional when `PR` is provided and `start_stage=review_loop`.
+- `PR` _(optional)_: a GitHub PR number. Only honored when `start_stage=review_loop` and `TICKET` is omitted — enables PR-only review without a feature workspace.
 - `start_stage` _(optional)_: one of `brief | plan | implement | pr | review_loop`. If omitted, resume from the stage recorded in `state.json` (or `brief` for a fresh run). Per-stage slash commands (`/feature-brief`, `/feature-plan`, etc.) pass this explicitly.
-- `mode` _(optional)_: `only` or `continue`. Default `continue` (run the start stage and all downstream stages — the original `/feature` behavior). `only` runs exactly one stage and returns control to the user. Per-stage commands default to `only`.
+- `mode` _(optional)_: `only` or `continue`. Default `continue` (run the start stage and all downstream stages — the original `/feature` behavior). `only` runs exactly one stage and returns control to the user. Per-stage commands default to `only`. PR-only review (`PR=...`, no `TICKET`) implicitly forces `mode=only`.
 
 ## Workspace
 
 For every run, the workspace is `.claude/features/<TICKET>/`. Create it if missing.
+
+**PR-only review exception**: when invoked with `PR=<number>` and no `TICKET`, the workspace is `.claude/features/pr-<number>/` instead. There is no brief, no tasks, no feature branch managed by us — only `state.json` and the review loop output.
 
 The single source of truth for progress is `.claude/features/<TICKET>/state.json`. Always read it before acting and write it after every meaningful step.
 
@@ -50,6 +53,21 @@ When the user enters mid-pipeline, the conductor must verify the upstream artifa
 | `review_loop` | `state.json:pr.url` populated (or current branch has an open PR discoverable via `gh pr view`) | "No open PR found for this ticket. Run `/feature-pr` first or pass the PR URL via state.json."                      |
 
 When seeding succeeds, set the relevant `stages.<name>.status = "complete"` and `asset` fields, then proceed to the requested `start_stage`.
+
+### PR-only review entry
+
+When invoked with `PR=<number>` and no `TICKET` (only valid for `start_stage=review_loop`):
+
+1. Resolve PR metadata: `gh pr view <PR> --json number,url,headRefName,title,body,state,baseRefName`. Fail with the user-facing message from `/feature-review` if not open.
+2. Workspace: `.claude/features/pr-<number>/`. Create if missing.
+3. Seed `state.json` with:
+   - `ticket: null`
+   - `branch: <headRefName>`
+   - `stage: "review_loop"`
+   - `stages.brief / plan / implement / pr` all `{ "status": "complete", "asset": null }` (pr also gets `url` and `number`)
+   - `stages.review_loop: { "status": "in_progress", "round": 0, "max_rounds": 5, "rounds": [] }`
+4. Persist the PR title and body to `.claude/features/pr-<number>/pr-context.md` (used by reviewers in place of a brief).
+5. Proceed directly to Stage 5 below. Force `mode=only`.
 
 ## Mode handling
 
@@ -103,13 +121,15 @@ For each task in `tasks.md`:
 
 ### Stage 5 — review loop (`review_loop`)
 
+Workspace key for downstream skills: if `TICKET` is set, pass `TICKET=<ticket>`; otherwise (PR-only mode) pass `PR_WORKSPACE=pr-<number>` so `pr-review-orchestrator` and `pr-triage` read/write `.claude/features/<PR_WORKSPACE>/state.json` and use `pr-context.md` in place of `brief.md`.
+
 Loop, increment `round` per iteration. While `round < max_rounds`:
 
 1. Invoke `pr-review-orchestrator` skill. It spawns the 4-agent review team in parallel and returns when all comments are posted.
-2. Invoke `pr-triage` skill. It triages each comment, replies, creates tracker subtasks for "later", and returns `{ will_fix: [...], wont_fix: [...], later: [...] }`.
+2. Invoke `pr-triage` skill. It triages each comment, replies, creates tracker subtasks for "later" (skipped in PR-only mode — see that skill), and returns `{ will_fix: [...], wont_fix: [...], later: [...] }`.
 3. Append the round summary to `review_loop.rounds`.
 4. If `will_fix` is empty → exit loop.
-5. Else: spawn an implementation subagent with the will-fix list and `brief.md`. It fixes and pushes. Loop.
+5. Else: spawn an implementation subagent with the will-fix list and the context document (`brief.md` if it exists, otherwise `pr-context.md`). It fixes and pushes to the PR's head branch. Loop.
 
 On loop exit:
 

@@ -4,11 +4,11 @@
   "title": "Feature workflow state",
   "description": "Schema for .claude/features/<TICKET>/state.json, the durable progress record for a single feature workflow run.",
   "type": "object",
-  "required": ["ticket", "stage", "stages"],
+  "required": ["stage", "stages"],
   "properties": {
     "ticket": {
-      "type": "string",
-      "description": "Tracker ticket ID, e.g. ABC-1234. Pattern is configurable per project in .claude/commands/feature.md."
+      "type": ["string", "null"],
+      "description": "Tracker ticket ID, e.g. ABC-1234. Pattern is configurable per project in .claude/commands/feature.md. Null in PR-only review mode (workspace .claude/features/pr-<NUMBER>/), where review runs without a feature workspace."
     },
     "branch": {
       "type": ["string", "null"],

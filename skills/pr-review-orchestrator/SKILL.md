@@ -10,16 +10,20 @@ You spawn the parallel review team for the open PR and ensure all four reviewers
 ## Input
 
 - `PR_NUMBER`: the GitHub PR number (e.g., `123`).
-- `TICKET`: tracker ticket ID (used to locate state.json).
+- `TICKET` _(optional)_: tracker ticket ID. Used to locate the feature workspace at `.claude/features/<TICKET>/`.
+- `PR_WORKSPACE` _(optional)_: alternative workspace key (e.g. `pr-123`) for PR-only review with no ticket. Exactly one of `TICKET` or `PR_WORKSPACE` must be provided.
 - `ROUND`: current review round number (1-indexed).
 
 ## Steps
 
 ### 1. Pre-flight
 
-- Read `.claude/features/<TICKET>/state.json` to confirm we are in the `review_loop` stage and `round` matches the caller's claim.
+- Workspace path: `WS = .claude/features/<TICKET or PR_WORKSPACE>/`.
+- Read `<WS>/state.json` to confirm we are in the `review_loop` stage and `round` matches the caller's claim.
 - Fetch the PR diff: `gh pr diff <PR_NUMBER> > /tmp/pr-<PR>-r<ROUND>.diff`. Keep this local; do not pass it inline to every reviewer (token waste).
-- Locate the brief: `.claude/features/<TICKET>/brief.md`.
+- Locate the context document:
+  - If `<WS>/brief.md` exists, use it (full feature brief).
+  - Else use `<WS>/pr-context.md` (PR title + body, written by the conductor in PR-only mode).
 
 ### 2. Spawn the 4-agent review team in parallel
 
@@ -36,7 +40,7 @@ Note on overrides: when both the plugin and the consuming project define an agen
 
 Prompt structure for each reviewer (substitute the lane-specific guidance):
 
-> You are the **<LANE>** reviewer for PR #<PR_NUMBER> on branch <branch>. Read the PR diff at `/tmp/pr-<PR>-r<ROUND>.diff` and the feature brief at `.claude/features/<TICKET>/brief.md`. Find issues **only in your lane** — do not comment on other lanes' concerns.
+> You are the **<LANE>** reviewer for PR #<PR_NUMBER> on branch <branch>. Read the PR diff at `/tmp/pr-<PR>-r<ROUND>.diff` and the context document at `<WS>/brief.md` (or `<WS>/pr-context.md` if there is no brief — PR-only review mode means you have only the PR title and body as intent). Find issues **only in your lane** — do not comment on other lanes' concerns. In PR-only mode, do not flag missing-brief or scope-ambiguity issues — assume the PR's stated scope is the truth.
 >
 > Post each issue as a separate review comment using `gh pr review <PR_NUMBER> --comment --body "..."` (one issue per `gh` call). Each comment body MUST start with the lane tag: `[<lane>]` (e.g. `[correctness]`, `[arch]`, `[security]`, `[ux]`). After the tag, write 1–3 sentences: what is wrong, where, and how to fix.
 >
@@ -52,7 +56,7 @@ The single-message parallel invocation will return after all four agents finish.
 
 ### 4. Record the round
 
-Update `.claude/features/<TICKET>/state.json:review_loop.rounds[<round-1>]`:
+Update `<WS>/state.json:review_loop.rounds[<round-1>]`:
 
 ```json
 {
@@ -69,7 +73,7 @@ Update `.claude/features/<TICKET>/state.json:review_loop.rounds[<round-1>]`:
 
 ### 5. Hand off to triage
 
-Invoke the `pr-triage` skill with `PR_NUMBER`, `TICKET`, and `ROUND`. It will read the comments via `gh api`, triage each, reply, and return the `will_fix` list.
+Invoke the `pr-triage` skill with `PR_NUMBER`, `ROUND`, and the same workspace identifier you received (`TICKET` or `PR_WORKSPACE`). It will read the comments via `gh api`, triage each, reply, and return the `will_fix` list.
 
 ## Output
 

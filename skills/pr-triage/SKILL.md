@@ -10,8 +10,11 @@ You triage the review team's comments and decide what gets fixed in this round.
 ## Input
 
 - `PR_NUMBER`: GitHub PR number.
-- `TICKET`: tracker ticket ID.
+- `TICKET` _(optional)_: tracker ticket ID. When set, "later" items become tracker subtasks of this ticket.
+- `PR_WORKSPACE` _(optional)_: alternative workspace key (e.g. `pr-123`) for PR-only review with no ticket. Exactly one of `TICKET` or `PR_WORKSPACE` must be provided.
 - `ROUND`: review round number.
+
+Workspace path: `WS = .claude/features/<TICKET or PR_WORKSPACE>/`.
 
 ## Steps
 
@@ -60,7 +63,9 @@ Reply format examples:
 
 ### 4. Create tracker subtasks for "later" items
 
-For each `later` comment:
+**PR-only mode** (no `TICKET`): skip subtask creation entirely. Your reply from step 3 is the durable record — phrase it as `[later] Out of scope for this review; tracking externally.` Move on.
+
+**Ticket mode**: for each `later` comment:
 
 1. Use your tracker's "create issue" MCP tool (JIRA: `mcp__claude_ai_Atlassian_Rovo__createJiraIssue`) with:
    - `projectKey`: same as the original ticket's project (parse from the ticket ID's prefix).
@@ -90,7 +95,7 @@ Output a JSON object (printed to stdout, parseable by the caller):
 
 ### 6. Update state.json
 
-Append this triage result to `.claude/features/<TICKET>/state.json:review_loop.rounds[<round-1>].triage`.
+Append this triage result to `<WS>/state.json:review_loop.rounds[<round-1>].triage`.
 
 ## Constraints
 
