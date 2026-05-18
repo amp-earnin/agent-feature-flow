@@ -101,7 +101,26 @@
         "triage": {
           "type": "object",
           "properties": {
-            "will_fix": { "type": "array" },
+            "will_fix": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["comment_id", "thread_id"],
+                "properties": {
+                  "comment_id": {
+                    "type": "integer",
+                    "description": "GitHub REST comment.id"
+                  },
+                  "thread_id": {
+                    "type": "string",
+                    "description": "GraphQL review-thread node ID. Required so the fix subagent can call resolveReviewThread after applying the fix."
+                  },
+                  "path": { "type": "string" },
+                  "line": { "type": "integer" },
+                  "summary": { "type": "string" }
+                }
+              }
+            },
             "wont_fix": { "type": "array" },
             "later": { "type": "array" }
           }

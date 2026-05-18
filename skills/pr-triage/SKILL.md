@@ -23,25 +23,36 @@ Workspace path: `WS = .claude/features/<TICKET or PR_WORKSPACE>/`.
 
 ## Steps
 
-### 1. Fetch all review comments
+### 1. Fetch all review comments and thread state
 
-The orchestrator's contract is: reviewers post **findings** as inline file comments (Pull Request Review Comments API) and post **"no issues found" sentinels** as issue comments (since there is no line to anchor to). Read both.
+The orchestrator's contract is: reviewers post **findings** as inline file comments (Pull Request Review Comments API) and post **"no issues found" sentinels** as issue comments (since there is no line to anchor to). Read both, plus the GraphQL review-thread state so resolved threads can be skipped.
 
 ```bash
 # Findings — inline file comments
 gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments --paginate > /tmp/pr-<PR>-r<ROUND>-inline.json
 # Sentinels (and any stray issue-level findings)
 gh api repos/{owner}/{repo}/issues/<PR_NUMBER>/comments --paginate > /tmp/pr-<PR>-r<ROUND>-issue.json
+# Thread state (resolved? thread node id?)
+gh api graphql -f query='
+  query($owner:String!,$repo:String!,$pr:Int!){
+    repository(owner:$owner,name:$repo){pullRequest(number:$pr){
+      reviewThreads(first:100){nodes{id isResolved comments(first:1){nodes{databaseId}}}}
+    }}
+  }
+' -f owner=<owner> -f repo=<repo> -F pr=<PR_NUMBER> > /tmp/pr-<PR>-r<ROUND>-threads.json
 ```
+
+Build a map `thread_by_comment_id[comment.databaseId] = {thread_id, isResolved}` from the GraphQL result, then attach `thread_id` and `isResolved` to each inline comment.
 
 If `inline.json` is empty but you see `[<lane>] ...` content in **PR review bodies** (`gh api .../pulls/<PR_NUMBER>/reviews`), the reviewers used the wrong API — this is a contract bug, not a routing rule. STOP and surface the mismatch to the conductor rather than silently rescuing it; replying to review bodies with issue comments creates a pile of unanchored noise.
 
-Parse `inline.json`. Each comment has `id`, `body`, `path`, `line`, `user.login`, `in_reply_to_id`.
+Parse `inline.json`. Each comment has `id`, `body`, `path`, `line`, `user.login`, `in_reply_to_id`, plus the attached `thread_id` and `isResolved`.
 
 **Filter**:
 
+- **Skip every comment on a resolved thread** (`isResolved === true`). Resolved threads represent fixes already verified by a reviewer in Step A — they are not your concern. (Exception: if a reviewer just unresolved a thread in this round, the new reply comment will be on an unresolved thread and pass this filter normally.)
 - From `issue.json`, drop any `[<lane>] No issues found` — these are sentinels confirming a lane ran clean.
-- From `inline.json`, skip comments where `in_reply_to_id` is set — those are replies, not top-level findings.
+- From `inline.json`, skip comments where `in_reply_to_id` is set — those are replies, not top-level findings. (Caveat: the verification-failure reply from a reviewer's Step A IS a reply, but it starts with `[<lane>] Fix verification failed`. Treat any reply whose body starts with that exact phrase as a top-level finding for this round.)
 - Skip comments already authored by you in a previous round (look for the triage tags `[will-fix]`, `[won't-fix]`, `[later]` at the start of body).
 - If after filtering there are **zero findings**, do not post anything. Write an empty triage result and exit. Do not generate placeholder "Triage of review:" comments.
 
@@ -99,7 +110,7 @@ Output a JSON object (printed to stdout, parseable by the caller):
 {
   "round": <ROUND>,
   "will_fix": [
-    { "comment_id": ..., "path": ..., "line": ..., "summary": "..." }
+    { "comment_id": ..., "thread_id": "...", "path": ..., "line": ..., "summary": "..." }
   ],
   "wont_fix": [...],
   "later": [
@@ -107,6 +118,8 @@ Output a JSON object (printed to stdout, parseable by the caller):
   ]
 }
 ```
+
+`thread_id` is required on every `will_fix` entry — the fix subagent uses it to resolve the GitHub review thread after applying the fix, which is how subsequent rounds know the finding is "handled, awaiting verification."
 
 ### 6. Update state.json
 

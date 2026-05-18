@@ -169,7 +169,24 @@ Loop, increment `round` per iteration. While `round < max_rounds`:
 4. If `will_fix` is empty → exit loop with `review_loop.status = "complete"` and `review_loop.exit_reason = "clean"`. The PR is clean per the reviewers.
 5. Else, **gate on branch ownership** — read `state.json:pr.owns_branch`. Both modes set this field explicitly (ticket mode in Stage 4 step 3; PR-only mode in the PR-only entry step 6), so the check is uniform: there should never be an undefined value at this point.
 
-   If `owns_branch === true`: spawn an implementation subagent with the will-fix list and the context document (`brief.md` in ticket mode, `pr-context.md` in PR-only mode). It fixes and pushes to the head branch. Then loop — re-review the new HEAD, re-triage, until `will_fix` is empty or `round >= max_rounds`. This is the convergence loop: keep fixing and re-reviewing until reviewers find nothing.
+   If `owns_branch === true`: spawn an implementation subagent with the will-fix list (each item carries `thread_id`) and the context document (`brief.md` in ticket mode, `pr-context.md` in PR-only mode). Hand it this contract:
+
+   > For each will-fix item:
+   >
+   > 1. Apply the fix to the file at `path:line` per the comment's guidance.
+   > 2. Run `bash scripts/verify.sh` (or the project's verify entrypoint). Do not proceed if it fails.
+   > 3. Commit the fix.
+   > 4. **Resolve the corresponding GitHub review thread** so subsequent rounds know this finding is handled:
+   >
+   >    ```bash
+   >    gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=<thread_id>
+   >    ```
+   >
+   > 5. Skip any item whose `thread_id` is already resolved — that means an earlier iteration in this same fix pass already handled it (defense against duplicate-finding bundling).
+   >
+   > After all items are processed, push the branch. The next iteration of Stage 5's loop will re-spawn reviewers; their Step A will verify each resolved thread against the new HEAD and unresolve any thread whose fix didn't actually land (which becomes a new will-fix for the following round).
+
+   Then loop — re-review the new HEAD, re-triage, until `will_fix` is empty or `round >= max_rounds`. This is the convergence loop: keep fixing and re-reviewing until reviewers find nothing.
 
    If `owns_branch === false`: do NOT spawn an implementation subagent. The head branch lives on a fork or we lack push access. Exit the loop with `review_loop.status = "needs_human"` and `review_loop.exit_reason = "unpushable"`. Surface the full `will_fix` list to checkpoint 2 as a punch list — the human reviewer relays it to the PR author, who fixes their branch and pushes; a subsequent `/feature-review` invocation will resume with round N+1 against the new HEAD.
 
