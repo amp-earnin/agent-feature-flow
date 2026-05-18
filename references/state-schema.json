@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/amp-earnin/agent-feature-flow/references/state-schema.json",
   "title": "Feature workflow state",
-  "description": "Schema for .claude/features/<TICKET>/state.json, the durable progress record for a single feature workflow run.",
+  "description": "Schema for .claude/features/<TICKET>/state.json (or .claude/features/_pr-<NUMBER>/state.json in PR-only review mode), the durable progress record for a single feature workflow run.",
   "type": "object",
-  "required": ["ticket", "stage", "stages"],
+  "required": ["stage", "stages"],
   "properties": {
     "ticket": {
-      "type": "string",
-      "description": "Tracker ticket ID, e.g. ABC-1234. Pattern is configurable per project in .claude/commands/feature.md."
+      "type": ["string", "null"],
+      "description": "Tracker ticket ID, e.g. ABC-1234. Pattern is configurable per project in .claude/commands/feature.md. Null in PR-only review mode (workspace .claude/features/_pr-<NUMBER>/), where review runs without a feature workspace."
     },
     "branch": {
       "type": ["string", "null"],
@@ -39,7 +39,11 @@
           "properties": {
             "status": { "$ref": "#/$defs/status" },
             "url": { "type": ["string", "null"], "format": "uri" },
-            "number": { "type": ["integer", "null"] }
+            "number": { "type": ["integer", "null"] },
+            "owns_branch": {
+              "type": "boolean",
+              "description": "True if the head branch lives in this repo (not a fork) and we can push to it. Written explicitly by the conductor in both modes — Stage 4 (open PR) sets it true after creating the branch in ticket mode; the PR-only review entry computes it from the ownership check (same-repo head AND `gh pr checkout` success). Stage 5's auto-fix loop gates on a strict `=== true` check, so this field MUST be present whenever the loop runs."
+            }
           },
           "required": ["status"]
         },
@@ -52,6 +56,20 @@
             "rounds": {
               "type": "array",
               "items": { "$ref": "#/$defs/round" }
+            },
+            "exit_reason": {
+              "type": ["string", "null"],
+              "enum": ["clean", "unpushable", "max_rounds_exhausted", null],
+              "description": "How the loop exited. 'clean': will_fix empty, PR ready to merge. 'unpushable': head branch is on a fork or otherwise un-pushable; will-fix surfaced as a punch list. 'max_rounds_exhausted': hit max_rounds with unresolved will-fix; in modes where we own the branch the user can still choose to iterate. Null while the loop is in progress."
+            },
+            "bot_identity": {
+              "type": ["string", "null"],
+              "description": "GitHub login of the agent running this workflow (from `gh api user --jq .login`). Captured at workspace seed time. Used by pr-triage to verify that 'Fix verification failed' replies were actually authored by us — otherwise a third party could spoof verification failures on a public-repo PR and trick the fix subagent into applying bogus 'fixes'."
+            },
+            "valid_thread_ids": {
+              "type": ["array", "null"],
+              "items": { "type": "string" },
+              "description": "Allowlist of GraphQL review-thread node IDs that actually belong to this PR. Populated by pr-review-orchestrator's pre-flight from `pullRequest.reviewThreads`. Reviewer Step A, pr-triage, and the fix subagent MUST validate every thread_id against this allowlist before calling resolveReviewThread / unresolveReviewThread — otherwise a compromised subagent could mutate threads on unrelated PRs in the same org."
             }
           },
           "required": ["status", "round", "max_rounds", "rounds"]
@@ -92,7 +110,32 @@
         "triage": {
           "type": "object",
           "properties": {
-            "will_fix": { "type": "array" },
+            "will_fix": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["comment_id", "thread_id", "path", "line"],
+                "properties": {
+                  "comment_id": {
+                    "type": "integer",
+                    "description": "GitHub REST comment.id"
+                  },
+                  "thread_id": {
+                    "type": "string",
+                    "description": "GraphQL review-thread node ID. Required so the fix subagent can call resolveReviewThread after the fix lands on the remote."
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "File path the comment anchors to. Required — the fix subagent uses path:line as the primary fix locator."
+                  },
+                  "line": {
+                    "type": "integer",
+                    "description": "Line in the new file. Required — see path."
+                  },
+                  "summary": { "type": "string" }
+                }
+              }
+            },
             "wont_fix": { "type": "array" },
             "later": { "type": "array" }
           }

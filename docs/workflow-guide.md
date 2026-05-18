@@ -31,13 +31,14 @@ State is persisted to `.claude/features/<TICKET>/state.json` (schema: `${CLAUDE_
 
 Sometimes you don't want the full pipeline. Maybe you wrote the brief yourself and just want planning to run, or maybe Stage 3 finished a week ago and you only want to re-open the PR. Each stage has its own slash command:
 
-| Command                       | Enters at      | Default behavior                                                  |
-| ----------------------------- | -------------- | ----------------------------------------------------------------- |
-| `/feature-brief <TICKET>`     | gather + brief | runs Stage 1, stops at human checkpoint 1                         |
-| `/feature-plan <TICKET>`      | plan           | runs Stage 2 only — requires `brief.md`                           |
-| `/feature-implement <TICKET>` | implement      | runs Stage 3 only — requires `brief.md` + `tasks.md`              |
-| `/feature-pr <TICKET>`        | open PR        | runs Stage 4 only — requires a feature branch with commits        |
-| `/feature-review <TICKET>`    | review loop    | runs Stage 5 + checkpoint 2 — requires an open PR for this ticket |
+| Command                       | Enters at      | Default behavior                                                                                                                                                                                                      |
+| ----------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/feature-brief <TICKET>`     | gather + brief | runs Stage 1, stops at human checkpoint 1                                                                                                                                                                             |
+| `/feature-plan <TICKET>`      | plan           | runs Stage 2 only — requires `brief.md`                                                                                                                                                                               |
+| `/feature-implement <TICKET>` | implement      | runs Stage 3 only — requires `brief.md` + `tasks.md`                                                                                                                                                                  |
+| `/feature-pr <TICKET>`        | open PR        | runs Stage 4 only — requires a feature branch with commits                                                                                                                                                            |
+| `/feature-review <TICKET>`    | review loop    | runs Stage 5 + checkpoint 2 — requires an open PR for this ticket                                                                                                                                                     |
+| `/feature-review #<PR>`       | review loop    | PR-only mode — review any open PR by number; no ticket / brief required; auto-fix loop runs if `gh pr checkout` succeeds (i.e. the head branch is in this repo and we have push rights), otherwise emits a punch list |
 
 **Default is "only this stage."** Pass `--continue` to run that stage and everything downstream:
 
@@ -134,7 +135,9 @@ Each posts comments tagged with their lane (`[correctness]`, `[arch]`, `[securit
 
 Then a triage subagent classifies each comment as **will-fix / won't-fix / later**, replies on the thread, creates tracker subtasks for "later," and hands the will-fix list to an implementation subagent.
 
-Loop continues until `will-fix` is empty or `max_rounds` (default 5) is reached. Configure max rounds by editing `state.json:review_loop.max_rounds` before the loop starts.
+The implementation subagent applies fixes, runs `verify.sh`, commits, pushes, and **resolves the GitHub review thread** for each will-fix item. The next round's reviewers begin with **Step A — re-review of prior fixes**: for each resolved thread in their lane, they re-read the file at the original `path:line` against the new HEAD and either leave the thread resolved (the fix landed) or **unresolve it** and post `[<lane>] Fix from round N not landed (re-review at round N+1): ...`. That reply enters the same round's triage as a normal finding and flows through the same will-fix path. Watching the PR conversation, you'll see threads tick to resolved as the loop converges; any that get re-opened across rounds point exactly to fixes the reviewers rejected.
+
+Loop continues until `will-fix` is empty (and no Step-A thread was rejected) or `max_rounds` (default 5) is reached. Configure max rounds by editing `state.json:review_loop.max_rounds` before the loop starts.
 
 ## Resuming a workflow
 
