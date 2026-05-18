@@ -21,6 +21,7 @@ You spawn the parallel review team for the open PR and ensure all four reviewers
 - Workspace path: `WS = .claude/features/<TICKET or PR_WORKSPACE>/`.
 - Read `<WS>/state.json` to confirm we are in the `review_loop` stage and `round` matches the caller's claim.
 - Fetch the PR diff: `gh pr diff <PR_NUMBER> > /tmp/pr-<PR>-r<ROUND>.diff`. Keep this local; do not pass it inline to every reviewer (token waste).
+- Capture the PR's head commit SHA — reviewers need it to anchor inline comments: `HEAD_SHA=$(gh pr view <PR_NUMBER> --json headRefOid -q .headRefOid)`. Pass it to each reviewer.
 - Locate the context document:
   - If `<WS>/brief.md` exists, use it (full feature brief).
   - Else use `<WS>/pr-context.md` (PR title + body, written by the conductor in PR-only mode).
@@ -40,11 +41,28 @@ Note on overrides: when both the plugin and the consuming project define an agen
 
 Prompt structure for each reviewer (substitute the lane-specific guidance):
 
-> You are the **<LANE>** reviewer for PR #<PR_NUMBER> on branch <branch>. Read the PR diff at `/tmp/pr-<PR>-r<ROUND>.diff` and the context document at `<WS>/brief.md` (or `<WS>/pr-context.md` if there is no brief — PR-only review mode means you have only the PR title and body as intent). Find issues **only in your lane** — do not comment on other lanes' concerns. In PR-only mode, do not flag missing-brief or scope-ambiguity issues — assume the PR's stated scope is the truth.
+> You are the **<LANE>** reviewer for PR #<PR_NUMBER> on branch <branch> (head SHA `<HEAD_SHA>`). Read the PR diff at `/tmp/pr-<PR>-r<ROUND>.diff` and the context document at `<WS>/brief.md` (or `<WS>/pr-context.md` if there is no brief — PR-only review mode means you have only the PR title and body as intent). Find issues **only in your lane** — do not comment on other lanes' concerns. In PR-only mode, do not flag missing-brief or scope-ambiguity issues — assume the PR's stated scope is the truth.
 >
-> Post each issue as a separate review comment using `gh pr review <PR_NUMBER> --comment --body "..."` (one issue per `gh` call). Each comment body MUST start with the lane tag: `[<lane>]` (e.g. `[correctness]`, `[arch]`, `[security]`, `[ux]`). After the tag, write 1–3 sentences: what is wrong, where, and how to fix.
+> **Post each issue as an inline file comment anchored to a specific line in the diff.** Use the GitHub Pull Request Review Comments API — NOT `gh pr review --comment`, which creates a top-level review body that the triage step cannot read.
 >
-> If you find no issues in your lane, post a single comment: `[<lane>] No issues found in this lane.`
+> For each finding, run:
+>
+> ```bash
+> gh api -X POST repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments \
+>   -f body="[<lane>] <1–3 sentences: what is wrong and how to fix>" \
+>   -f commit_id="<HEAD_SHA>" \
+>   -f path="<file path from diff>" \
+>   -F line=<line number in the new file> \
+>   -f side="RIGHT"
+> ```
+>
+> Each `body` MUST start with the lane tag: `[<lane>]` (e.g. `[correctness]`, `[arch]`, `[security]`, `[ux]`). One finding per call. Pick the most relevant new-file line from the diff — for findings that span a range, anchor to the first line and reference the range in the body.
+>
+> If you find no issues in your lane, post a single **issue comment** (not file-anchored, since there's nothing to anchor to):
+>
+> ```bash
+> gh pr comment <PR_NUMBER> --body "[<lane>] No issues found in this lane."
+> ```
 >
 > Return a one-line summary: `<lane>: N comments posted`.
 

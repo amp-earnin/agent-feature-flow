@@ -20,17 +20,25 @@ Workspace path: `WS = .claude/features/<TICKET or PR_WORKSPACE>/`.
 
 ### 1. Fetch all review comments
 
+The orchestrator's contract is: reviewers post **findings** as inline file comments (Pull Request Review Comments API) and post **"no issues found" sentinels** as issue comments (since there is no line to anchor to). Read both.
+
 ```bash
-gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments --paginate > /tmp/pr-<PR>-r<ROUND>-comments.json
+# Findings — inline file comments
+gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments --paginate > /tmp/pr-<PR>-r<ROUND>-inline.json
+# Sentinels (and any stray issue-level findings)
+gh api repos/{owner}/{repo}/issues/<PR_NUMBER>/comments --paginate > /tmp/pr-<PR>-r<ROUND>-issue.json
 ```
 
-Parse the JSON. Each comment has `id`, `body`, `path`, `line`, `user.login`, `in_reply_to_id`.
+If `inline.json` is empty but you see `[<lane>] ...` content in **PR review bodies** (`gh api .../pulls/<PR_NUMBER>/reviews`), the reviewers used the wrong API — this is a contract bug, not a routing rule. STOP and surface the mismatch to the conductor rather than silently rescuing it; replying to review bodies with issue comments creates a pile of unanchored noise.
+
+Parse `inline.json`. Each comment has `id`, `body`, `path`, `line`, `user.login`, `in_reply_to_id`.
 
 **Filter**:
 
-- Skip comments where `body` starts with `[<lane>] No issues found` — these are sentinels, not issues.
-- Skip comments where `in_reply_to_id` is set — those are replies, not top-level findings.
+- From `issue.json`, drop any `[<lane>] No issues found` — these are sentinels confirming a lane ran clean.
+- From `inline.json`, skip comments where `in_reply_to_id` is set — those are replies, not top-level findings.
 - Skip comments already authored by you in a previous round (look for the triage tags `[will-fix]`, `[won't-fix]`, `[later]` at the start of body).
+- If after filtering there are **zero findings**, do not post anything. Write an empty triage result and exit. Do not generate placeholder "Triage of review:" comments.
 
 Lane-tag contract: see `${CLAUDE_PLUGIN_ROOT}/references/lane-tags.md`.
 
@@ -51,9 +59,11 @@ Lean toward **will-fix** when the comment is from the `[correctness]` or `[secur
 For every triaged comment, post a reply on the same thread:
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments/<COMMENT_ID>/replies \
-  -F body="[<tag>] <one-sentence reasoning>"
+gh api -X POST repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments/<COMMENT_ID>/replies \
+  -f body="[<tag>] <one-sentence reasoning>"
 ```
+
+(Use `-f` for string values; `-F` treats the input as a typed parameter and can mangle the body. The reply endpoint requires `POST`.)
 
 Reply format examples:
 
