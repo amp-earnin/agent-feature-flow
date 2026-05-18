@@ -31,12 +31,12 @@ Argument: **$ARGUMENTS**
 
    The conductor runs the convergence loop: reviewers → triage → if will-fix is empty exit clean, else apply fixes and re-review, up to `max_rounds` (default 5). The auto-fix-and-re-review step is gated on whether we own the head branch — if the PR is from a fork or otherwise un-pushable, the loop exits after one round with the will-fix list surfaced to the human as a punch list.
 
-4. **Surface human checkpoint 2**: when the conductor returns, use `AskUserQuestion`. The options depend on the loop outcome:
-   - Loop converged clean (`review_loop.status === "complete"`): _Merge_ / _Iterate_ / _Abandon_.
-   - Loop exited because we don't own the branch (`review_loop.status === "needs_human"`, fork PR): _Approve_ / _Request changes (relay punch list)_ / _Abandon_. "Iterate" is not offered because we cannot push fixes.
-   - Loop hit `max_rounds` with unresolved will-fix: same as the fork case — surface the remaining will-fix as a punch list.
+4. **Surface human checkpoint 2**: when the conductor returns, dispatch on `review_loop.exit_reason`:
+   - `"clean"`: loop converged. Options: _Merge_ / _Iterate_ / _Abandon_.
+   - `"max_rounds_exhausted"` AND `pr.owns_branch === true` (ticket mode, or PR-only mode on an in-repo branch): options remain _Merge_ / _Iterate_ / _Abandon_ — the human can choose to drive another round manually if they think the remaining will-fix items are addressable. Surface the remaining `will_fix` as a punch list in the question context so the human has full information.
+   - `"unpushable"` (fork PR or no-push-rights): options _Approve_ / _Request changes (relay punch list)_ / _Abandon_. _Iterate_ is **not** offered because we cannot push fixes — the PR author must do that, on their fork.
 
-   Pass the PR URL, round count, and won't-fix + later lists in the question context.
+   Always pass the PR URL, round count, won't-fix list, and later list in the question context.
 
 ## Constraints
 

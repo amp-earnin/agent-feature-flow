@@ -79,7 +79,9 @@ If a prerequisite is missing, the command fails with instructions — it does NO
 - Workspace is `.claude/features/_pr-<NUMBER>/` (leading underscore avoids collisions with tracker IDs).
 - Skips brief / plan / implement. PR title + body act as intent.
 - **Auto-fix loop is gated on branch ownership**. If the head branch lives in this repo (and `gh pr checkout` succeeds), the convergence loop runs: review → fix → re-review until reviewers find nothing or `max_rounds` (default 5) is hit. If the PR is from a fork or otherwise un-pushable, the loop exits after one round with the will-fix list as a punch list for you to relay to the PR author.
-- Requires `.claude/features/` to be in `.gitignore` (PR bodies can contain sensitive content).
+- Requires `.claude/features/` to be in `.gitignore` (PR bodies can contain sensitive content). If it isn't, the conductor aborts with:
+
+  > Refusing to write PR content to a tracked path. Add `.claude/features/` to `.gitignore` and retry.
 
 Example — write your own brief, then jump straight into planning + everything downstream:
 

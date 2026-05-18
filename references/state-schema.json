@@ -56,6 +56,11 @@
             "rounds": {
               "type": "array",
               "items": { "$ref": "#/$defs/round" }
+            },
+            "exit_reason": {
+              "type": ["string", "null"],
+              "enum": ["clean", "unpushable", "max_rounds_exhausted", null],
+              "description": "How the loop exited. 'clean': will_fix empty, PR ready to merge. 'unpushable': head branch is on a fork or otherwise un-pushable; will-fix surfaced as a punch list. 'max_rounds_exhausted': hit max_rounds with unresolved will-fix; in modes where we own the branch the user can still choose to iterate. Null while the loop is in progress."
             }
           },
           "required": ["status", "round", "max_rounds", "rounds"]
