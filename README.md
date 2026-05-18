@@ -68,8 +68,18 @@ Each stage has its own command. By default it runs **only that stage** and stops
 | `/feature-implement ABC-1234` | implement      | `brief.md` + `tasks.md`   |
 | `/feature-pr ABC-1234`        | open PR        | feature branch w/ commits |
 | `/feature-review ABC-1234`    | review loop    | open PR                   |
+| `/feature-review #123`        | review loop    | open PR (PR-only mode)    |
 
 If a prerequisite is missing, the command fails with instructions — it does NOT auto-run upstream stages. Write the artifact yourself or run the upstream command. Per-ticket artifacts live in `.claude/features/<TICKET>/`.
+
+### Reviewing any PR (no ticket needed)
+
+`/feature-review` also accepts a bare PR number (`#123`) — useful for reviewing an external contributor's PR or any change that did not originate from this workflow. PR-only mode:
+
+- Workspace is `.claude/features/_pr-<NUMBER>/` (leading underscore avoids collisions with tracker IDs).
+- Skips brief / plan / implement. PR title + body act as intent.
+- **Review-and-triage only** — no auto-fix loop, since the head branch may belong to a contributor on a fork. Will-fix findings are surfaced to you as a punch list at checkpoint 2.
+- Requires `.claude/features/` to be in `.gitignore` (PR bodies can contain sensitive content).
 
 Example — write your own brief, then jump straight into planning + everything downstream:
 

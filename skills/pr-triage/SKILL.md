@@ -11,8 +11,10 @@ You triage the review team's comments and decide what gets fixed in this round.
 
 - `PR_NUMBER`: GitHub PR number.
 - `TICKET` _(optional)_: tracker ticket ID. When set, "later" items become tracker subtasks of this ticket.
-- `PR_WORKSPACE` _(optional)_: alternative workspace key (e.g. `pr-123`) for PR-only review with no ticket. Exactly one of `TICKET` or `PR_WORKSPACE` must be provided.
+- `PR_WORKSPACE` _(optional)_: alternative workspace key (e.g. `_pr-123` — leading underscore makes it disjoint from any tracker ID) for PR-only review with no ticket.
 - `ROUND`: review round number.
+
+**Precondition**: exactly one of `TICKET` or `PR_WORKSPACE` must be set. If both or neither, abort with: `pr-triage: exactly one of TICKET or PR_WORKSPACE must be provided.`
 
 Workspace path: `WS = .claude/features/<TICKET or PR_WORKSPACE>/`.
 

@@ -29,8 +29,9 @@ Is a tracker ticket the work unit (e.g. ABC-1234, ENG-42)?
   │                                          (interprets scripts/verify.sh output)
   │
   ├── Want to review any open PR by
-  │   number (no ticket / brief) ─────────→ run `/feature-review <PR-NUMBER>`
-  │                                          (PR-only mode: workspace .claude/features/pr-<N>/)
+  │   number (no ticket / brief) ─────────→ run `/feature-review #<PR-NUMBER>`
+  │                                          (PR-only mode: workspace .claude/features/_pr-<N>/;
+  │                                          review-and-triage only, no auto-fix)
   │
   ├── Already have an open PR, want
   │   the parallel reviewer team ─────────→ invoke pr-review-orchestrator

@@ -31,13 +31,14 @@ State is persisted to `.claude/features/<TICKET>/state.json` (schema: `${CLAUDE_
 
 Sometimes you don't want the full pipeline. Maybe you wrote the brief yourself and just want planning to run, or maybe Stage 3 finished a week ago and you only want to re-open the PR. Each stage has its own slash command:
 
-| Command                       | Enters at      | Default behavior                                                  |
-| ----------------------------- | -------------- | ----------------------------------------------------------------- |
-| `/feature-brief <TICKET>`     | gather + brief | runs Stage 1, stops at human checkpoint 1                         |
-| `/feature-plan <TICKET>`      | plan           | runs Stage 2 only — requires `brief.md`                           |
-| `/feature-implement <TICKET>` | implement      | runs Stage 3 only — requires `brief.md` + `tasks.md`              |
-| `/feature-pr <TICKET>`        | open PR        | runs Stage 4 only — requires a feature branch with commits        |
-| `/feature-review <TICKET>`    | review loop    | runs Stage 5 + checkpoint 2 — requires an open PR for this ticket |
+| Command                       | Enters at      | Default behavior                                                                                                   |
+| ----------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `/feature-brief <TICKET>`     | gather + brief | runs Stage 1, stops at human checkpoint 1                                                                          |
+| `/feature-plan <TICKET>`      | plan           | runs Stage 2 only — requires `brief.md`                                                                            |
+| `/feature-implement <TICKET>` | implement      | runs Stage 3 only — requires `brief.md` + `tasks.md`                                                               |
+| `/feature-pr <TICKET>`        | open PR        | runs Stage 4 only — requires a feature branch with commits                                                         |
+| `/feature-review <TICKET>`    | review loop    | runs Stage 5 + checkpoint 2 — requires an open PR for this ticket                                                  |
+| `/feature-review #<PR>`       | review loop    | PR-only mode — review any open PR by number; no ticket / brief required; review-and-triage only (no auto-fix loop) |
 
 **Default is "only this stage."** Pass `--continue` to run that stage and everything downstream:
 
