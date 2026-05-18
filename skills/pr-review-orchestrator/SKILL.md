@@ -105,7 +105,7 @@ Prompt structure for each reviewer (substitute the lane-specific guidance):
 >    fi
 >    ```
 >
->    `<PRIOR_ROUND>` is the round in which the will-fix was originally applied (the reviewer can find this in the original comment's reply chain — the `[will-fix] ... Commit X` reply). The reword from "Fix verification failed" avoids collision with this codebase's existing meaning of "verify" (which refers to `scripts/verify.sh`).
+>    `<PRIOR_ROUND>` is the round in which the will-fix was originally applied. The reviewer finds it by scanning the original thread's replies for the bot-authored `[will-fix] Round <N>: ...` reply that pr-triage posted at the time — that round number is the source of truth. (If no such reply is found, fall back to `<ROUND> - 1` and note the inference in the body.) The reword from "Fix verification failed" avoids collision with this codebase's existing meaning of "verify" (which refers to `scripts/verify.sh`).
 >
 >    The "not landed" reply will be picked up by this round's triage as a normal finding (filed against the original comment thread), so it flows through the same will-fix loop. The escalation comment in the unresolve-failure path is the only durable signal a human reviewer would see for a stuck thread.
 >

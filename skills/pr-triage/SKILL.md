@@ -32,14 +32,25 @@ The orchestrator's contract is: reviewers post **findings** as inline file comme
 gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments --paginate > /tmp/pr-<PR>-r<ROUND>-inline.json
 # Sentinels (and any stray issue-level findings)
 gh api repos/{owner}/{repo}/issues/<PR_NUMBER>/comments --paginate > /tmp/pr-<PR>-r<ROUND>-issue.json
-# Thread state (resolved? thread node id?)
-gh api graphql -f query='
-  query($owner:String!,$repo:String!,$pr:Int!){
-    repository(owner:$owner,name:$repo){pullRequest(number:$pr){
-      reviewThreads(first:100){nodes{id isResolved comments(first:1){nodes{databaseId}}}}
-    }}
-  }
-' -f owner=<owner> -f repo=<repo> -F pr=<PR_NUMBER> > /tmp/pr-<PR>-r<ROUND>-threads.json
+# Thread state (resolved? thread node id?) — paginate; long-running PRs exceed the 100-thread page.
+cursor=""
+: > /tmp/pr-<PR>-r<ROUND>-threads.json
+while :; do
+  page=$(gh api graphql -f query='
+    query($owner:String!,$repo:String!,$pr:Int!,$after:String){
+      repository(owner:$owner,name:$repo){pullRequest(number:$pr){
+        reviewThreads(first:100, after:$after){
+          pageInfo{hasNextPage endCursor}
+          nodes{id isResolved comments(first:1){nodes{databaseId}}}
+        }
+      }}
+    }
+  ' -f owner=<owner> -f repo=<repo> -F pr=<PR_NUMBER> ${cursor:+-f after="$cursor"})
+  echo "$page" >> /tmp/pr-<PR>-r<ROUND>-threads.json
+  has_next=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+  [ "$has_next" = "true" ] || break
+  cursor=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+done
 ```
 
 Build a map `thread_by_comment_id[comment.databaseId] = {thread_id, isResolved}` from the GraphQL result, then attach `thread_id` and `isResolved` to each inline comment.
@@ -81,9 +92,14 @@ Lean toward **will-fix** when the comment is from the `[correctness]` or `[secur
 
 ### 3. Reply to each comment
 
-For every triaged comment, post a reply on the same thread:
+For every triaged comment, post a reply on the same thread. **For `will-fix` replies, include the round number** — this is the canonical source of truth for `<PRIOR_ROUND>` that future-round Step A reviewers reference when posting "not landed" replies:
 
 ```bash
+# will-fix: include the round number
+gh api -X POST repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments/<COMMENT_ID>/replies \
+  -f body="[will-fix] Round <ROUND>: <one-sentence reasoning>"
+
+# won't-fix and later: round number optional
 gh api -X POST repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments/<COMMENT_ID>/replies \
   -f body="[<tag>] <one-sentence reasoning>"
 ```
