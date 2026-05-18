@@ -42,7 +42,7 @@
             "number": { "type": ["integer", "null"] },
             "owns_branch": {
               "type": "boolean",
-              "description": "True if the head branch lives in this repo (not a fork) and we can push to it. Set by the conductor during PR-only entry; in ticket mode it is implicitly true since Stage 3 created the branch. Gates the Stage 5 auto-fix loop."
+              "description": "True if the head branch lives in this repo (not a fork) and we can push to it. Written explicitly by the conductor in both modes — Stage 4 (open PR) sets it true after creating the branch in ticket mode; the PR-only review entry computes it from the ownership check (same-repo head AND `gh pr checkout` success). Stage 5's auto-fix loop gates on a strict `=== true` check, so this field MUST be present whenever the loop runs."
             }
           },
           "required": ["status"]
