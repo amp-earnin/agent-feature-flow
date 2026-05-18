@@ -39,7 +39,11 @@
           "properties": {
             "status": { "$ref": "#/$defs/status" },
             "url": { "type": ["string", "null"], "format": "uri" },
-            "number": { "type": ["integer", "null"] }
+            "number": { "type": ["integer", "null"] },
+            "owns_branch": {
+              "type": "boolean",
+              "description": "True if the head branch lives in this repo (not a fork) and we can push to it. Set by the conductor during PR-only entry; in ticket mode it is implicitly true since Stage 3 created the branch. Gates the Stage 5 auto-fix loop."
+            }
           },
           "required": ["status"]
         },
