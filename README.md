@@ -79,6 +79,7 @@ If a prerequisite is missing, the command fails with instructions — it does NO
 - Workspace is `.claude/features/_pr-<NUMBER>/` (leading underscore avoids collisions with tracker IDs).
 - Skips brief / plan / implement. PR title + body act as intent.
 - **Auto-fix loop is gated on branch ownership**. If the head branch lives in this repo (and `gh pr checkout` succeeds), the convergence loop runs: review → fix → re-review until reviewers find nothing or `max_rounds` (default 5) is hit. If the PR is from a fork or otherwise un-pushable, the loop exits after one round with the will-fix list as a punch list for you to relay to the PR author.
+- **Differential review**: after the fix subagent applies a will-fix item and the push succeeds, it resolves the corresponding GitHub review thread. The next round's reviewers start with a verification pass — they re-read the file at the resolved thread's `path:line` and either leave the thread resolved (fix landed cleanly) or **unresolve it** and post `[<lane>] Fix from round N not landed (re-review at round N+1): ...`. That reply enters the same round's triage as a normal finding. The visible PR-conversation effect: threads tick to resolved as fixes land, and any that get re-opened across rounds tell you exactly which fixes the reviewers rejected.
 - Requires `.claude/features/` to be in `.gitignore` (PR bodies can contain sensitive content). If it isn't, the conductor aborts with:
 
   > Refusing to write PR content to a tracked path. Add `.claude/features/` to `.gitignore` and retry.

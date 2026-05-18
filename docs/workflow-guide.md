@@ -135,7 +135,9 @@ Each posts comments tagged with their lane (`[correctness]`, `[arch]`, `[securit
 
 Then a triage subagent classifies each comment as **will-fix / won't-fix / later**, replies on the thread, creates tracker subtasks for "later," and hands the will-fix list to an implementation subagent.
 
-Loop continues until `will-fix` is empty or `max_rounds` (default 5) is reached. Configure max rounds by editing `state.json:review_loop.max_rounds` before the loop starts.
+The implementation subagent applies fixes, runs `verify.sh`, commits, pushes, and **resolves the GitHub review thread** for each will-fix item. The next round's reviewers begin with **Step A — re-review of prior fixes**: for each resolved thread in their lane, they re-read the file at the original `path:line` against the new HEAD and either leave the thread resolved (the fix landed) or **unresolve it** and post `[<lane>] Fix from round N not landed (re-review at round N+1): ...`. That reply enters the same round's triage as a normal finding and flows through the same will-fix path. Watching the PR conversation, you'll see threads tick to resolved as the loop converges; any that get re-opened across rounds point exactly to fixes the reviewers rejected.
+
+Loop continues until `will-fix` is empty (and no Step-A thread was rejected) or `max_rounds` (default 5) is reached. Configure max rounds by editing `state.json:review_loop.max_rounds` before the loop starts.
 
 ## Resuming a workflow
 

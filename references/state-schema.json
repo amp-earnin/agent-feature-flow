@@ -61,6 +61,15 @@
               "type": ["string", "null"],
               "enum": ["clean", "unpushable", "max_rounds_exhausted", null],
               "description": "How the loop exited. 'clean': will_fix empty, PR ready to merge. 'unpushable': head branch is on a fork or otherwise un-pushable; will-fix surfaced as a punch list. 'max_rounds_exhausted': hit max_rounds with unresolved will-fix; in modes where we own the branch the user can still choose to iterate. Null while the loop is in progress."
+            },
+            "bot_identity": {
+              "type": ["string", "null"],
+              "description": "GitHub login of the agent running this workflow (from `gh api user --jq .login`). Captured at workspace seed time. Used by pr-triage to verify that 'Fix verification failed' replies were actually authored by us — otherwise a third party could spoof verification failures on a public-repo PR and trick the fix subagent into applying bogus 'fixes'."
+            },
+            "valid_thread_ids": {
+              "type": ["array", "null"],
+              "items": { "type": "string" },
+              "description": "Allowlist of GraphQL review-thread node IDs that actually belong to this PR. Populated by pr-review-orchestrator's pre-flight from `pullRequest.reviewThreads`. Reviewer Step A, pr-triage, and the fix subagent MUST validate every thread_id against this allowlist before calling resolveReviewThread / unresolveReviewThread — otherwise a compromised subagent could mutate threads on unrelated PRs in the same org."
             }
           },
           "required": ["status", "round", "max_rounds", "rounds"]
@@ -105,7 +114,7 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["comment_id", "thread_id"],
+                "required": ["comment_id", "thread_id", "path", "line"],
                 "properties": {
                   "comment_id": {
                     "type": "integer",
@@ -113,10 +122,16 @@
                   },
                   "thread_id": {
                     "type": "string",
-                    "description": "GraphQL review-thread node ID. Required so the fix subagent can call resolveReviewThread after applying the fix."
+                    "description": "GraphQL review-thread node ID. Required so the fix subagent can call resolveReviewThread after the fix lands on the remote."
                   },
-                  "path": { "type": "string" },
-                  "line": { "type": "integer" },
+                  "path": {
+                    "type": "string",
+                    "description": "File path the comment anchors to. Required — the fix subagent uses path:line as the primary fix locator."
+                  },
+                  "line": {
+                    "type": "integer",
+                    "description": "Line in the new file. Required — see path."
+                  },
                   "summary": { "type": "string" }
                 }
               }
