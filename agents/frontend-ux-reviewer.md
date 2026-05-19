@@ -20,6 +20,8 @@ A complete reference implementation for a Vite + React 19 + React Query + TanSta
 
 Read the PR diff and the feature brief. Find UX or pattern problems. Post each finding as a separate **inline file comment** anchored to a specific line in the diff via the Pull Request Review Comments API (see "How to post comments" below), prefixed with `[ux]`. One issue per comment. If nothing in your lane, post one sentinel **issue comment** (not file-anchored): `[ux] No issues found in this lane.`
 
+On rounds after the first, the orchestrator may pass you `resolved_threads` from the prior round — a list of comment threads whose fix you should re-review (Step A). The full Step A protocol lives in `skills/pr-review-orchestrator/SKILL.md`; the `M prior fixes rejected` dimension in your return summary comes from that re-review.
+
 ## Lane scope — what to look for (customize each section)
 
 ### Data fetching
@@ -77,7 +79,7 @@ Don't run a full axe audit in review — that belongs in CI. Flag what's visibly
 **Findings — inline file comments only.** The orchestrator passes you `HEAD_SHA` (the PR head commit) and expects each finding anchored to a specific line in the new file:
 
 ```bash
-gh api -X POST repos/:owner/:repo/pulls/<PR_NUMBER>/comments \
+gh api -X POST repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments \
   -f body="[ux] <finding>" \
   -f commit_id="<HEAD_SHA>" \
   -f path="<file path from diff>" \
@@ -97,7 +99,7 @@ gh pr comment <PR_NUMBER> --body "[ux] No issues found in this lane."
 
 ## Return
 
-When done, return a single-line summary: `ux: N comments posted`. Don't paste the comments back.
+When done, return a single-line summary: `ux: N new findings, M prior fixes rejected`. Don't paste the comments back.
 
 ---
 
