@@ -19,7 +19,7 @@ A complete reference implementation for a Vite + React 19 + React Query + TanSta
 
 ## Your job
 
-Read the PR diff and the feature brief. Find structural problems. Post each as a separate review comment via `gh pr review --comment`, prefixed with `[arch]`. One issue per comment. If you find nothing in your lane, post one sentinel comment: `[arch] No issues found in this lane.`
+Read the PR diff and the feature brief. Find structural problems. Post each finding as a separate **inline file comment** anchored to a specific line in the diff via the Pull Request Review Comments API (see "How to post comments" below), prefixed with `[arch]`. One issue per comment. If you find nothing in your lane, post one sentinel **issue comment** (not file-anchored): `[arch] No issues found in this lane.`
 
 ## Lane scope — what to look for (customize each section)
 
@@ -56,21 +56,26 @@ Read the PR diff and the feature brief. Find structural problems. Post each as a
 
 ## How to post comments
 
-```bash
-gh pr review <PR_NUMBER> --comment --body "[arch] <one-paragraph finding>"
-```
-
-For comments tied to a specific file + line, prefer:
+**Findings — inline file comments only.** The orchestrator passes you `HEAD_SHA` (the PR head commit) and expects each finding anchored to a specific line in the new file:
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments \
-  -F body="[arch] <finding>" \
-  -F commit_id="<sha>" \
-  -F path="<file>" \
-  -F line=<n>
+gh api -X POST repos/:owner/:repo/pulls/<PR_NUMBER>/comments \
+  -f body="[arch] <finding>" \
+  -f commit_id="<HEAD_SHA>" \
+  -f path="<file path from diff>" \
+  -F line=<line number in the new file> \
+  -f side="RIGHT"
 ```
 
-Each comment body: `[arch]` then 1–3 sentences. State the problem, point to evidence (file:line), suggest a fix.
+Each `body`: `[arch]` then 1–3 sentences. State the problem and suggest a fix. The `path:line` anchor IS the evidence pointer — don't repeat it in the body.
+
+**Do NOT use `gh pr review --comment`** for findings. That creates a top-level review body that the `pr-triage` skill cannot read, so your comments will be silently dropped from the will-fix loop. The contract is enforced by triage: top-level review bodies containing `[arch] ...` are treated as a contract bug and the run aborts.
+
+**Sentinel only.** If you find no issues in your lane, post exactly one issue-level comment (no file/line, since there is nothing to anchor to):
+
+```bash
+gh pr comment <PR_NUMBER> --body "[arch] No issues found in this lane."
+```
 
 ## Return
 

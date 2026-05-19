@@ -18,7 +18,7 @@ A complete reference implementation for a Vite + React 19 + React Query + TanSta
 
 ## Your job
 
-Read the PR diff and the feature brief. Find UX or pattern problems. Post each as a separate review comment via `gh pr review --comment`, prefixed with `[ux]`. One issue per comment. If nothing in your lane, post one sentinel: `[ux] No issues found in this lane.`
+Read the PR diff and the feature brief. Find UX or pattern problems. Post each finding as a separate **inline file comment** anchored to a specific line in the diff via the Pull Request Review Comments API (see "How to post comments" below), prefixed with `[ux]`. One issue per comment. If nothing in your lane, post one sentinel **issue comment** (not file-anchored): `[ux] No issues found in this lane.`
 
 ## Lane scope — what to look for (customize each section)
 
@@ -74,21 +74,26 @@ Don't run a full axe audit in review — that belongs in CI. Flag what's visibly
 
 ## How to post comments
 
-```bash
-gh pr review <PR_NUMBER> --comment --body "[ux] <one-paragraph finding>"
-```
-
-For file+line tied comments:
+**Findings — inline file comments only.** The orchestrator passes you `HEAD_SHA` (the PR head commit) and expects each finding anchored to a specific line in the new file:
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments \
-  -F body="[ux] <finding>" \
-  -F commit_id="<sha>" \
-  -F path="<file>" \
-  -F line=<n>
+gh api -X POST repos/:owner/:repo/pulls/<PR_NUMBER>/comments \
+  -f body="[ux] <finding>" \
+  -f commit_id="<HEAD_SHA>" \
+  -f path="<file path from diff>" \
+  -F line=<line number in the new file> \
+  -f side="RIGHT"
 ```
 
-Each body: `[ux]` then 1–3 sentences. State the problem, point to evidence (file:line), suggest a concrete fix or link to a similar existing component.
+Each `body`: `[ux]` then 1–3 sentences. State the problem and suggest a concrete fix (or link to a similar existing component). The `path:line` anchor IS the evidence pointer — don't repeat it in the body.
+
+**Do NOT use `gh pr review --comment`** for findings. That creates a top-level review body that the `pr-triage` skill cannot read, so your comments will be silently dropped from the will-fix loop. The contract is enforced by triage: top-level review bodies containing `[ux] ...` are treated as a contract bug and the run aborts.
+
+**Sentinel only.** If you find no issues in your lane, post exactly one issue-level comment (no file/line, since there is nothing to anchor to):
+
+```bash
+gh pr comment <PR_NUMBER> --body "[ux] No issues found in this lane."
+```
 
 ## Return
 
