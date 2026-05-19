@@ -73,6 +73,8 @@ Each `body`: `[arch]` then 1–3 sentences. State the problem and suggest a fix.
 
 **Do NOT use `gh pr review --comment`** for findings. That creates a top-level review body that the `pr-triage` skill cannot read, so your comments will be silently dropped from the will-fix loop. The contract is enforced by triage: top-level review bodies containing `[arch] ...` are treated as a contract bug and the run aborts.
 
+**On inline-API failure, skip — never fall back.** If the Pull Request Review Comments API returns a 4xx (e.g. 422 `pull_request_review_thread.line must be part of the diff`), surface the failure in your return summary and skip that comment. Do NOT fall back to `gh pr review --comment`, do NOT re-post the finding via `gh pr comment` (the sentinel-only use of `gh pr comment` for the "no issues found" line is unchanged), and do NOT use any other top-level posting method.
+
 **Sentinel only.** If you find no issues in your lane, post exactly one issue-level comment (no file/line, since there is nothing to anchor to):
 
 ```bash
