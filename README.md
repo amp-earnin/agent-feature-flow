@@ -47,6 +47,19 @@ After install, complete the [consumer setup checklist](./references/consumer-set
 4. **Override the two reviewer agents** with project-scoped versions filled in for your stack.
 5. Add `.claude/features/` to `.gitignore`.
 
+## Updating
+
+To pull in a newer published version of the plugin:
+
+```
+/plugin marketplace update feature-flow-marketplace
+/plugin install feature-flow@feature-flow-marketplace
+```
+
+The first command refreshes the marketplace catalog from `amp-earnin/agent-feature-flow`; the second picks up the new version.
+
+To skip this step on future updates, run `/plugin`, open the **Marketplaces** tab, select `feature-flow-marketplace`, and toggle **Enable auto-update** — new versions will be picked up at Claude Code startup.
+
 ## Quick start
 
 After setup:
