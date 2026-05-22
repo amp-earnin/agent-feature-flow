@@ -163,7 +163,7 @@ For each task in `tasks.md`:
 
 ### Stage 5 — review loop (`review_loop`)
 
-Workspace key for downstream skills: compute `WORKSPACE`. In ticket mode, `WORKSPACE=<TICKET>`. In PR-only mode (no `TICKET`), `WORKSPACE=_pr-<number>`. Pass `WORKSPACE` to `pr-review-orchestrator` and `pr-triage` on every invocation so they read/write `.claude/features/<WORKSPACE>/state.json`. Additionally pass `TICKET=<ticket>` in ticket mode — `pr-triage` uses it (only) to create tracker subtasks for "later" items. The orchestrator selects `<WS>/brief.md` when `TICKET` is set and `<WS>/pr-context.md` otherwise.
+Workspace key for downstream skills: compute `WORKSPACE`. In ticket mode, `WORKSPACE=<TICKET>`. In PR-only mode (no `TICKET`), `WORKSPACE=_pr-<number>`. Pass `WORKSPACE` to `pr-review-orchestrator` and `pr-triage` on every invocation so they read/write `.claude/features/<WORKSPACE>/state.json`. Additionally pass `TICKET=<ticket>` in ticket mode — both skills use `TICKET` as a mode discriminator for their preconditions (cross-check, ticket-mode invariant, and the conditional PR-only-shape check), and `pr-triage` additionally uses it to create tracker subtasks for "later" items. The orchestrator selects `<WS>/brief.md` when `TICKET` is set and `<WS>/pr-context.md` otherwise.
 
 Loop, increment `round` per iteration. While `round < max_rounds`:
 
