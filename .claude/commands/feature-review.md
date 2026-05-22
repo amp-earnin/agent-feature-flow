@@ -38,6 +38,10 @@ Argument: **$ARGUMENTS**
 
    Always pass the PR URL, round count, won't-fix list, and later list in the question context.
 
+## Direct callers
+
+If you're invoking `pr-review-orchestrator` or `pr-triage` directly (outside this command), pass `WORKSPACE=<dirname>` instead of a tracker ticket. The conductor performs the `TICKET → WORKSPACE` mapping for you when you go through `/feature-review`, so the slash command's contract here (step 3) is unchanged.
+
 ## Constraints
 
 - Do not review code yourself — the 4-agent reviewer team runs in parallel subagents.
