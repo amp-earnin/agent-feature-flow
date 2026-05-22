@@ -40,7 +40,12 @@ Argument: **$ARGUMENTS**
 
 ## Direct callers
 
-If you're invoking `pr-review-orchestrator` or `pr-triage` directly (outside this command), pass `WORKSPACE=<dirname>` instead of a tracker ticket. The conductor performs the `TICKET → WORKSPACE` mapping for you when you go through `/feature-review`, so the slash command's contract here (step 3) is unchanged.
+If you're invoking `pr-review-orchestrator` or `pr-triage` directly (outside this command), pass one of these two call shapes:
+
+- **Ticket mode**: pass `WORKSPACE=<TICKET-ID>` AND `TICKET=<TICKET-ID>` (same value — the ticket-mode invariant requires `WORKSPACE === TICKET`).
+- **PR-only mode**: pass `WORKSPACE=_pr-<number>` and omit `TICKET`.
+
+The conductor performs this mapping for you when you go through `/feature-review`, so the slash command's contract here (step 3) is unchanged.
 
 ## Constraints
 
