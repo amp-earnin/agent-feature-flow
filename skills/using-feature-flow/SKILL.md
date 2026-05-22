@@ -36,8 +36,8 @@ Is a tracker ticket the work unit (e.g. ABC-1234, ENG-42)?
   │
   ├── Already have an open PR, want
   │   the parallel reviewer team ─────────→ invoke pr-review-orchestrator
-  │                                          (manually pass PR_NUMBER, ROUND, and either
-  │                                          TICKET or PR_WORKSPACE)
+  │                                          (manually pass PR_NUMBER, ROUND, and
+  │                                          WORKSPACE (+ optional TICKET))
   │
   └── Have review comments, need triage ──→ invoke pr-triage
                                             (classifies + replies)
