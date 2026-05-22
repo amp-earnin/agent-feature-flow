@@ -10,16 +10,16 @@ You triage the review team's comments and decide what gets fixed in this round.
 ## Input
 
 - `PR_NUMBER`: GitHub PR number.
-- `TICKET` _(optional)_: tracker ticket ID. When set, "later" items become tracker subtasks of this ticket.
-- `PR_WORKSPACE` _(optional)_: alternative workspace key (e.g. `_pr-123` — leading underscore makes it disjoint from any tracker ID) for PR-only review with no ticket.
+- `WORKSPACE`: workspace dirname (e.g. `PROJ-123` in ticket mode, `_pr-123` in PR-only review mode).
+- `TICKET` _(optional)_: tracker ticket ID, used only for tracker subtask creation in "later" triage.
 - `ROUND`: review round number.
 
 **Preconditions**:
 
-- Exactly one of `TICKET` or `PR_WORKSPACE` must be set. If both or neither, abort with: `pr-triage: exactly one of TICKET or PR_WORKSPACE must be provided.`
-- If `PR_WORKSPACE` is set, it MUST match `^_pr-[0-9]+$`. If not matched, abort with: `pr-triage: PR_WORKSPACE must match ^_pr-[0-9]+$, got: <value>.`
+- If `WORKSPACE` is missing/empty, abort with: `pr-triage: WORKSPACE is required`.
+- `WORKSPACE` MUST match `^[A-Za-z0-9_-]+$`. If not matched, abort with: `pr-triage: WORKSPACE must match ^[A-Za-z0-9_-]+$, got: <value>.`
 
-Workspace path: `WS = .claude/features/<TICKET or PR_WORKSPACE>/`.
+Workspace path: `WS = .claude/features/<WORKSPACE>/`.
 
 ## Steps
 
@@ -114,7 +114,7 @@ Reply format examples:
 
 ### 4. Create tracker subtasks for "later" items
 
-**PR-only mode** (no `TICKET`): skip subtask creation entirely — there is no tracker to file into. Your reply from step 3 is the durable record. Phrase it honestly: `[later] Out of scope for this review. No tracker is configured, so this finding is not being tracked elsewhere — surface it to a human if it matters.` Don't claim "tracking externally" when nothing is being tracked.
+**PR-only mode** (no `TICKET` set): skip subtask creation entirely — there is no tracker to file into. Your reply from step 3 is the durable record. Phrase it honestly: `[later] Out of scope for this review. No tracker is configured, so this finding is not being tracked elsewhere — surface it to a human if it matters.` Don't claim "tracking externally" when nothing is being tracked.
 
 **Ticket mode**: for each `later` comment:
 
