@@ -14,10 +14,14 @@ You triage the review team's comments and decide what gets fixed in this round.
 - `TICKET` _(optional)_: tracker ticket ID, used only for tracker subtask creation in "later" triage.
 - `ROUND`: review round number.
 
-**Preconditions**:
+**Preconditions** (apply in order — each check assumes the prior ones passed; mirrors `pr-review-orchestrator` since both skills are reachable directly via `/feature-review` and must enforce their own input contract per the brief's defensive-validation decision):
 
 - If `WORKSPACE` is missing/empty, abort with: `pr-triage: WORKSPACE is required`.
+- `WORKSPACE` MUST NOT contain whitespace or control characters. If `WORKSPACE` contains any character outside the printable ASCII range or matches `[[:space:]]`, abort with: `pr-triage: WORKSPACE must not contain whitespace or control characters, got: <repr(value)>.` (Checked BEFORE the charset regex as defense in depth — independent of regex-engine quirks around `\s` semantics.)
 - `WORKSPACE` MUST match `^[A-Za-z0-9_-]+$`. If not matched, abort with: `pr-triage: WORKSPACE must match ^[A-Za-z0-9_-]+$, got: <value>.`
+- In PR-only mode (`TICKET` not set), `WORKSPACE` MUST additionally match `^_pr-[0-9]+$`. If not matched, abort with: `pr-triage: WORKSPACE must match ^_pr-[0-9]+$ for PR-only review, got: <value>.`
+- **Cross-check** (only when `TICKET` is set): if `WORKSPACE` matches `^_pr-[0-9]+$`, the two signals disagree — abort with: `pr-triage: TICKET and WORKSPACE shape disagree — TICKET is set but WORKSPACE matches the PR-only shape (^_pr-[0-9]+$). Pass exactly one consistent pair.`
+- **Ticket-mode invariant** (only when `TICKET` is set): `WORKSPACE` MUST equal `TICKET`. If not, abort with: `pr-triage: in ticket mode, WORKSPACE must equal TICKET, got WORKSPACE=<value>, TICKET=<value>.` (Together with the cross-check above, this restores the structural namespace disjointness the two-field design guaranteed by construction.)
 
 Workspace path: `WS = .claude/features/<WORKSPACE>/`.
 
