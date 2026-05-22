@@ -18,10 +18,13 @@ You spawn the parallel review team for the open PR and ensure all four reviewers
 
 ### 1. Pre-flight
 
-- **Preconditions**:
+- **Preconditions** (apply in order — each check assumes the prior ones passed):
   - `WORKSPACE` must be set and non-empty. If missing/empty, abort with: `pr-review-orchestrator: WORKSPACE is required`.
+  - `WORKSPACE` MUST NOT contain whitespace or control characters. If `WORKSPACE` contains any character outside the printable ASCII range or matches `[[:space:]]`, abort with: `pr-review-orchestrator: WORKSPACE must not contain whitespace or control characters, got: <repr(value)>.` (Checked BEFORE the charset regex as defense in depth — independent of regex-engine quirks around `\s` semantics.)
   - `WORKSPACE` MUST match `^[A-Za-z0-9_-]+$` (defensive charset check — the value is interpolated into a filesystem path). If not matched, abort with: `pr-review-orchestrator: WORKSPACE must match ^[A-Za-z0-9_-]+$, got: <value>.`
   - In PR-only mode (`TICKET` not set), `WORKSPACE` MUST additionally match `^_pr-[0-9]+$`. If not matched, abort with: `pr-review-orchestrator: WORKSPACE must match ^_pr-[0-9]+$ for PR-only review, got: <value>.`
+  - **Cross-check** (only when `TICKET` is set): if `WORKSPACE` matches `^_pr-[0-9]+$`, the two signals disagree — abort with: `pr-review-orchestrator: TICKET and WORKSPACE shape disagree — TICKET is set but WORKSPACE matches the PR-only shape (^_pr-[0-9]+$). Pass exactly one consistent pair.`
+  - **Ticket-mode invariant** (only when `TICKET` is set): `WORKSPACE` MUST equal `TICKET`. If not, abort with: `pr-review-orchestrator: in ticket mode, WORKSPACE must equal TICKET, got WORKSPACE=<value>, TICKET=<value>.` (Together with the cross-check above, this restores the structural namespace disjointness the two-field design guaranteed by construction.)
 - Workspace path: `WS = .claude/features/<WORKSPACE>/`.
 - Read `<WS>/state.json` to confirm we are in the `review_loop` stage and `round` matches the caller's claim.
 - Fetch the PR diff: `gh pr diff <PR_NUMBER> > /tmp/pr-<PR>-r<ROUND>.diff`. Keep this local; do not pass it inline to every reviewer (token waste).
