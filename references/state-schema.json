@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/amp-earnin/agent-feature-flow/references/state-schema.json",
   "title": "Feature workflow state",
-  "description": "Schema for .claude/features/<TICKET>/state.json (or .claude/features/_pr-<NUMBER>/state.json in PR-only review mode), the durable progress record for a single feature workflow run.",
+  "description": "Schema for `.claude/features/<WORKSPACE>/state.json`, where `<WORKSPACE>` is a tracker ticket ID (ticket mode) or `_pr-<NUMBER>` (PR-only review mode). The durable progress record for a single feature workflow run.",
   "type": "object",
   "required": ["stage", "stages"],
   "properties": {
     "ticket": {
       "type": ["string", "null"],
-      "description": "Tracker ticket ID, e.g. ABC-1234. Pattern is configurable per project in .claude/commands/feature.md. Null in PR-only review mode (workspace .claude/features/_pr-<NUMBER>/), where review runs without a feature workspace."
+      "description": "Tracker ticket ID, e.g. ABC-1234. Pattern is configurable per project in .claude/commands/feature.md. Null in PR-only review mode, where review runs without a tracker ticket."
     },
     "branch": {
       "type": ["string", "null"],

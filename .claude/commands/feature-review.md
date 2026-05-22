@@ -38,6 +38,15 @@ Argument: **$ARGUMENTS**
 
    Always pass the PR URL, round count, won't-fix list, and later list in the question context.
 
+## Direct callers
+
+If you're invoking `pr-review-orchestrator` or `pr-triage` directly (outside this command), pass one of these two call shapes:
+
+- **Ticket mode**: pass `WORKSPACE=<TICKET-ID>` AND `TICKET=<TICKET-ID>` (same value — the ticket-mode invariant requires `WORKSPACE === TICKET`).
+- **PR-only mode**: pass `WORKSPACE=_pr-<number>` and omit `TICKET`.
+
+The conductor performs this mapping for you when you go through `/feature-review`, so the slash command's contract here (step 3) is unchanged.
+
 ## Constraints
 
 - Do not review code yourself — the 4-agent reviewer team runs in parallel subagents.
