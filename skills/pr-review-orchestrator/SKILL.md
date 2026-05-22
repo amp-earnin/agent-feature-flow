@@ -10,8 +10,8 @@ You spawn the parallel review team for the open PR and ensure all four reviewers
 ## Input
 
 - `PR_NUMBER`: the GitHub PR number (e.g., `123`).
-- `TICKET` _(optional)_: tracker ticket ID. Used to locate the feature workspace at `.claude/features/<TICKET>/`.
-- `PR_WORKSPACE` _(optional)_: alternative workspace key (e.g. `_pr-123` — note the leading underscore, which makes it disjoint from any tracker ID) for PR-only review with no ticket.
+- `WORKSPACE` _(required)_: workspace dirname under `.claude/features/`. Either a tracker ticket ID (ticket mode) or `_pr-<NUMBER>` (PR-only review mode — the leading underscore is load-bearing for collision-avoidance with tracker IDs).
+- `TICKET` _(optional)_: tracker ticket ID. Presence signals ticket mode and selects `brief.md` as the context document; absence signals PR-only mode and selects `pr-context.md`.
 - `ROUND`: current review round number (1-indexed).
 
 ## Steps
@@ -19,15 +19,16 @@ You spawn the parallel review team for the open PR and ensure all four reviewers
 ### 1. Pre-flight
 
 - **Preconditions**:
-  - Exactly one of `TICKET` or `PR_WORKSPACE` must be set. If both or neither, abort with: `pr-review-orchestrator: exactly one of TICKET or PR_WORKSPACE must be provided.`
-  - If `PR_WORKSPACE` is set, it MUST match `^_pr-[0-9]+$`. The leading underscore is load-bearing for collision-avoidance with tracker IDs. If not matched, abort with: `pr-review-orchestrator: PR_WORKSPACE must match ^_pr-[0-9]+$, got: <value>.`
-- Workspace path: `WS = .claude/features/<TICKET or PR_WORKSPACE>/`.
+  - `WORKSPACE` must be set and non-empty. If missing/empty, abort with: `pr-review-orchestrator: WORKSPACE is required`.
+  - `WORKSPACE` MUST match `^[A-Za-z0-9_-]+$` (defensive charset check — the value is interpolated into a filesystem path). If not matched, abort with: `pr-review-orchestrator: WORKSPACE must match ^[A-Za-z0-9_-]+$, got: <value>.`
+  - In PR-only mode (`TICKET` not set), `WORKSPACE` MUST additionally match `^_pr-[0-9]+$`. If not matched, abort with: `pr-review-orchestrator: WORKSPACE must match ^_pr-[0-9]+$ for PR-only review, got: <value>.`
+- Workspace path: `WS = .claude/features/<WORKSPACE>/`.
 - Read `<WS>/state.json` to confirm we are in the `review_loop` stage and `round` matches the caller's claim.
 - Fetch the PR diff: `gh pr diff <PR_NUMBER> > /tmp/pr-<PR>-r<ROUND>.diff`. Keep this local; do not pass it inline to every reviewer (token waste).
 - Capture the PR's head commit SHA — reviewers need it to anchor inline comments: `HEAD_SHA=$(gh pr view <PR_NUMBER> --json headRefOid -q .headRefOid)`. Pass it to each reviewer.
-- Locate the context document **based on input mode, not filesystem existence** (filesystem-existence checks are brittle — a stray `brief.md` left over from a renamed workspace would mis-route):
+- Locate the context document **based on `TICKET` presence, not filesystem existence** (filesystem-existence checks are brittle — a stray `brief.md` left over from a renamed workspace would mis-route):
   - Ticket mode (`TICKET` set): `<WS>/brief.md`. Abort if missing.
-  - PR-only mode (`PR_WORKSPACE` set): `<WS>/pr-context.md`. Abort if missing.
+  - PR-only mode (`TICKET` not set): `<WS>/pr-context.md`. Abort if missing.
 - If in PR-only mode, also read the per-run nonce from the context document's fence marker (`<!-- pr-untrusted-<NONCE>:start -->`) so it can be passed to reviewers in the spawn prompt.
 - **Fetch ALL review threads, paginated** — this runs **every round**, including round 1, because downstream skills (pr-triage's thread_id validation, the fix subagent's allowlist check) need a complete `valid_thread_ids` from the very first round. A long-running PR can accumulate >100 threads; the GraphQL page size is at most 100, so paginate explicitly:
 
@@ -159,7 +160,7 @@ Update `<WS>/state.json:review_loop.rounds[<round-1>]`:
 
 ### 5. Hand off to triage
 
-Invoke the `pr-triage` skill with `PR_NUMBER`, `ROUND`, and the same workspace identifier you received (`TICKET` or `PR_WORKSPACE`). It will read the comments via `gh api`, triage each, reply, and return the `will_fix` list.
+Invoke the `pr-triage` skill with `PR_NUMBER`, `ROUND`, and pass `WORKSPACE` (and `TICKET` when present). It will read the comments via `gh api`, triage each, reply, and return the `will_fix` list.
 
 ## Output
 
