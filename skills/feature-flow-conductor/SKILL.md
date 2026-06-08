@@ -249,7 +249,45 @@ Loop, increment `round` per iteration. While `round < max_rounds`:
 
 On loop exit in **in-place mode**, `review_loop.status` and `review_loop.exit_reason` are already set by whichever of the three in-place exit branches above ran (clean / unpushable / max_rounds_exhausted). The slash command's checkpoint 2 reads `exit_reason` to choose its options — do not re-derive status from any other source.
 
-In **stacked mode** the loop exits either clean (`will_fix` empty) or capped (`round >= max_rounds` with `review_loop.delivery.capped = true`); in both cases it proceeds to the stacked-mode delivery step (a later task) rather than ending on the in-place `unpushable` / `max_rounds_exhausted` reasons. The cap is conveyed by `review_loop.delivery.capped`, not by `exit_reason`.
+In **stacked mode** the loop exits either clean (`will_fix` empty) or capped (`round >= max_rounds` with `review_loop.delivery.capped = true`); in both cases it proceeds to the **stacked-mode delivery step** below rather than ending on the in-place `unpushable` / `max_rounds_exhausted` reasons. The cap is conveyed by `review_loop.delivery.capped`, not by `exit_reason`.
+
+#### Stacked-mode delivery step (stacked mode only)
+
+This step runs **once**, after the stacked loop exits (clean or capped), and only when `review_loop.review_mode === "stacked"`. It is part of Stage 5 — not a new workflow stage. In-place mode never reaches here; it goes straight to checkpoint 2. By the time this runs, the fix-subagent has already pushed the delivery branch (`review_loop.delivery.branch`) and the no-mutation gate has already persisted `review_loop.delivery.targets_head_branch`, `target_pr_number`, and (when the cap was hit) `capped`. **Do not recompute the base decision** — read the persisted fields. Mirror the Stage 4 `gh pr create` conventions (title/body/capture).
+
+1. **Restate the Decision-2 invariant before opening the PR.** At this point the target PR must be provably untouched: zero comments posted and zero commits pushed to it across the entire loop. If any step would have mutated the target PR, that is a bug — the delivery step never posts to, comments on, or pushes to the target PR. The only externally-visible artifact this step creates is the **delivery PR**.
+
+2. **Gather the body source material** from the workspace, not from the PR:
+   - **What changed + why**: the resolved will-fix findings — read the `<WS>/triage.json` entries with `classification = "will-fix"` and `resolved = true` (each carries `path`, `line`, `rationale`).
+   - **What was deliberately NOT changed (and why)**: the `won't-fix` entries from `<WS>/triage.json` (`classification = "won't-fix"`) — each entry's `rationale` is the source material (persisted by `pr-triage` in stacked mode for exactly this purpose).
+   - **Out-of-scope follow-ups**: the `later` entries from `<WS>/triage.json` (`classification = "later"`) — surfaced here because stacked mode files no tracker subtasks; the workspace `rationale` is their only durable record.
+   - **Capped punch list** _(conditional)_: only when `review_loop.delivery.capped === true`, the unresolved must-fix items — the will-fix findings still `resolved = false` after the final round.
+
+3. **Resolve the delivery base** from the persisted gate decision — do **not** recompute it:
+   - If `review_loop.delivery.targets_head_branch === true`: base the PR on the **target PR's head branch** (`headRefName`), so the author sees only the proposed fixes stacked on their work.
+   - If `false` (fork fallback): base the PR on **our base branch** (`baseRefName`), and make the body **prominently link the target PR** (`#<target_pr_number>`) since the PR cannot target the fork head.
+
+4. **Open the delivery PR** via `gh pr create`, head = `review_loop.delivery.branch`, base per step 3. Title format: `Stacked review fixes for #<target_pr_number>: <short summary>`. Body must include, in this order:
+
+   > **What changed and why**
+   > - Bullet per resolved will-fix finding: `path:line` — the fix and the one-to-two-sentence `rationale`.
+   >
+   > **What was deliberately NOT changed (and why)**
+   > - Bullet per won't-fix finding: the concern and its `rationale`. (Omit the heading only if there were none.)
+   >
+   > **Out-of-scope follow-ups**
+   > - Bullet per `later` finding: the concern and its `rationale`. Note these are not tracked elsewhere (no tracker is configured for a stacked review) and a human should pick them up if they matter. (Omit the heading only if there were none.)
+   >
+   > **⚠️ Round cap hit — unresolved must-fix items** _(include this block only when `review_loop.delivery.capped === true`)_
+   > - Prominent punch list of the will-fix findings that remain unresolved after `max_rounds` rounds. State plainly that the review-fix loop hit its round cap and these items still need attention (Decision 5: deliver anyway, with caveats).
+
+   When `targets_head_branch === false`, prefix the body with a line linking the target PR: `Proposed fixes for #<target_pr_number> (target PR is on a fork / not push-accessible, so this PR is based on <baseRefName> rather than the target head).`
+
+5. **Add the target PR's author as reviewer**, with a graceful no-fail fallback. Resolve the author login from the target PR (`gh pr view <target_pr_number> --json author -q .author.login`). Request them as reviewer — either `gh pr create --reviewer <login>` on the create call above, or `gh pr edit <delivery pr> --add-reviewer <login>` after. **If adding the reviewer fails** — most commonly because the author is the runner (you cannot review your own PR) or lacks repo access — **do NOT fail the delivery step**. Instead note it in the PR body (e.g. append: `_Could not auto-request @<login> as reviewer (<reason, e.g. author is the PR creator>); please add them manually._`) and continue. The delivery PR must still be created.
+
+6. **Persist delivery metadata** into `state.json:review_loop.delivery` on PR creation: set `branch` (already set by the fixer), `pr_url`, `pr_number`, `targets_head_branch` (already set by the gate — leave as-is), `target_pr_number` (already set — leave as-is), and `capped` (already set by the loop exit — leave as-is). These match the Task 1 schema (`{ branch, pr_url, pr_number, targets_head_branch, target_pr_number, capped }`). Set `review_loop.status = "complete"`.
+
+7. Proceed to checkpoint 2, which surfaces the delivery PR URL alongside the target PR URL.
 
 ### ⏸ Human checkpoint 2
 
