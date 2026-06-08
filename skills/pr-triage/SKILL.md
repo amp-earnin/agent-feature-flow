@@ -191,8 +191,9 @@ Parse `<WS>/findings.json` as an array of finding objects (`id`, `lane`, `path`,
 **Filter** (the workspace analogue of in-place's filter; far simpler because there are no PR threads, no replies, and no spoofing surface — the file is written only by our own orchestrator subagent):
 
 1. Consider only findings for the current `ROUND` (the orchestrator's Step A re-review appends fresh findings per round; earlier-round findings already have a `triage.json` entry).
-2. Skip any finding `id` that already has a decision in `<WS>/triage.json` from a prior round — never re-classify or escalate a prior decision (mirrors the in-place "don't rewrite history" rule).
-3. If after filtering there are **zero** new findings, write nothing new to `triage.json` and return an empty triage result. Do not invent placeholder entries.
+2. Drop any finding whose `body` is the clean-lane sentinel `No issues found in this lane.` — these are records confirming a lane ran clean (in stacked mode the orchestrator appends one per clean lane at the end of its Step B), not actionable findings. This mirrors the in-place filter's `[<lane>] No issues found` drop, so a clean-lane sentinel never flows into S2 classification.
+3. Skip any finding `id` that already has a decision in `<WS>/triage.json` from a prior round — never re-classify or escalate a prior decision (mirrors the in-place "don't rewrite history" rule).
+4. If after filtering there are **zero** new findings, write nothing new to `triage.json` and return an empty triage result. Do not invent placeholder entries.
 
 There is no `bot_identity` check in stacked mode: nothing is read from or written to the PR, so there is no reply-author to authenticate. (The in-place `bot_identity` / `valid_thread_ids` machinery is untouched and applies to in-place mode only.)
 
