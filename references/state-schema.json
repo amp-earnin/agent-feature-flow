@@ -51,6 +51,12 @@
           "type": "object",
           "properties": {
             "status": { "$ref": "#/$defs/status" },
+            "review_mode": {
+              "type": "string",
+              "enum": ["in_place", "stacked"],
+              "default": "in_place",
+              "description": "Discriminator the review-fix loop reads to choose its coordination channel. 'in_place' (default): reviewers and pr-triage post inline comments/replies on the PR and the fixer pushes to the PR head branch — the existing behavior for ticket review and PR-comment review. 'stacked': non-invasive mode (`/feature-review #<PR> --stacked`); the target PR is never mutated (no comments posted, no commits pushed). The reviewer↔triage↔fixer loop coordinates entirely via workspace files under `.claude/features/_pr-<N>/` (see references/lane-tags.md, 'Workspace-file coordination'), and the fixes are delivered as a separate PR described by `delivery` below."
+            },
             "round": { "type": "integer", "minimum": 0 },
             "max_rounds": { "type": "integer", "minimum": 1, "default": 5 },
             "rounds": {
@@ -59,8 +65,39 @@
             },
             "exit_reason": {
               "type": ["string", "null"],
-              "enum": ["clean", "unpushable", "max_rounds_exhausted", null],
-              "description": "How the loop exited. 'clean': will_fix empty, PR ready to merge. 'unpushable': head branch is on a fork or otherwise un-pushable; will-fix surfaced as a punch list. 'max_rounds_exhausted': hit max_rounds with unresolved will-fix; in modes where we own the branch the user can still choose to iterate. Null while the loop is in progress."
+              "enum": ["clean", "unpushable", "max_rounds_exhausted", "delivered", null],
+              "description": "How the loop exited. In-place mode (`review_mode = 'in_place'`) uses 'clean': will_fix empty, PR ready to merge; 'unpushable': head branch is on a fork or otherwise un-pushable, will-fix surfaced as a punch list; 'max_rounds_exhausted': hit max_rounds with unresolved will-fix, in modes where we own the branch the user can still choose to iterate. Stacked mode (`review_mode = 'stacked'`) uses 'delivered': the loop finished (cleanly OR after hitting the round cap) and the separate delivery PR was opened — the target PR was never mutated. Whether the cap was hit is conveyed by `delivery.capped`, NOT by a separate exit reason. Null while the loop is in progress."
+            },
+            "delivery": {
+              "type": ["object", "null"],
+              "description": "Stacked-mode only (`review_mode = 'stacked'`). Records the separate, reviewable PR that carries the agreed fixes. Null in 'in_place' mode and until the delivery PR is opened. Every field is nullable until delivery happens.",
+              "properties": {
+                "branch": {
+                  "type": ["string", "null"],
+                  "description": "Name of the delivery branch the fixer commits to. Never the target PR's head branch — the target PR is read-only in stacked mode."
+                },
+                "pr_url": {
+                  "type": ["string", "null"],
+                  "format": "uri",
+                  "description": "URL of the delivery PR carrying the fixes. Null until the delivery PR is opened."
+                },
+                "pr_number": {
+                  "type": ["integer", "null"],
+                  "description": "Number of the delivery PR. Null until opened."
+                },
+                "targets_head_branch": {
+                  "type": ["boolean", "null"],
+                  "description": "True if the delivery branch is stacked directly on the target PR's head branch (push-accessible in our repo) and the delivery PR targets that head branch, so the author sees only the proposed fixes. False for the fork-fallback: the target head is on a fork / not push-accessible, so the delivery branch is created off our base branch and the delivery PR links back to the target PR instead. Null until the base decision is made."
+                },
+                "target_pr_number": {
+                  "type": ["integer", "null"],
+                  "description": "Number of the original PR under review (the target). The delivery is stacked on / linked to this PR. Null until known."
+                },
+                "capped": {
+                  "type": ["boolean", "null"],
+                  "description": "True if the loop hit `max_rounds` with unresolved must-fix items still outstanding. In stacked mode the delivery PR is opened anyway, with the unresolved must-fix items listed prominently as a punch list in its description (non-convergence is delivered with caveats, not blocked). Null until the loop exits."
+                }
+              }
             },
             "bot_identity": {
               "type": ["string", "null"],
@@ -69,7 +106,7 @@
             "valid_thread_ids": {
               "type": ["array", "null"],
               "items": { "type": "string" },
-              "description": "Allowlist of GraphQL review-thread node IDs that actually belong to this PR. Populated by pr-review-orchestrator's pre-flight from `pullRequest.reviewThreads`. Reviewer Step A, pr-triage, and the fix subagent MUST validate every thread_id against this allowlist before calling resolveReviewThread / unresolveReviewThread — otherwise a compromised subagent could mutate threads on unrelated PRs in the same org."
+              "description": "Allowlist whose meaning depends on `review_mode`. In `in_place` mode it holds GraphQL review-thread node IDs that actually belong to this PR, populated by pr-review-orchestrator's pre-flight from `pullRequest.reviewThreads`. In `stacked` mode it instead holds workspace finding ids (the `id` field of each entry in `<WS>/findings.json`), populated from that file — the key name is kept for schema continuity across modes. In both modes, reviewer Step A, pr-triage, and the fix subagent MUST validate every id against this allowlist before acting on it (in_place: before calling resolveReviewThread / unresolveReviewThread; stacked: before applying a finding) — otherwise a compromised subagent could mutate threads or apply findings from an unrelated PR/run in the same org."
             }
           },
           "required": ["status", "round", "max_rounds", "rounds"]

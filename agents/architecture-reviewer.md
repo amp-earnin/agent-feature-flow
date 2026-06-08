@@ -49,6 +49,14 @@ On rounds after the first, the orchestrator may pass you `resolved_threads` from
 - Flag files doing two or more unrelated things.
 - Flag components mixing UI + business logic + I/O. Acceptable: UI + a single hook + render. Not acceptable: UI + multiple data sources + side-effectful logic.
 
+## Ground regression / bug claims in source or docs
+
+Before you assert that a change is a **regression** or a **bug** — including in a Step A re-review where you reject a prior fix — you MUST ground the claim in the **installed library source or the official documentation**, not in reasoning about the agent-written diff in a vacuum. Read the actual dependency code as it is installed in this project, or cite the official docs for the behavior you believe is broken, before recording the finding. If you cannot find that grounding, downgrade the finding to a question or drop it — do not assert a regression you have not verified against the real library behavior. (This closes a known false-positive class: a reviewer claiming a regression by reasoning about the diff without checking that the framework already handles the case.) This bar applies in every mode; in stacked mode it matters most, because the only externally-visible output is the delivery PR body, so an unverified regression claim ships unchallenged.
+
+<!-- EXAMPLE: "installed library source" is stack-specific. In a Node project that means reading the
+     dependency under `node_modules/<pkg>/`; in Python, the package under `site-packages/`; in Go,
+     the module under the module cache. Cite the file you read or the official doc URL in the finding. -->
+
 ## Lane scope — what you do NOT comment on
 
 - Bugs, missing cases, race conditions → that's the correctness reviewer.

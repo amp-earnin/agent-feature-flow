@@ -94,6 +94,8 @@ Default is 5. To change globally:
 
 To change per-run, edit `.claude/features/<TICKET>/state.json` before Stage 5 begins.
 
+The cap applies identically in stacked-pr review mode (`/feature-review #<PR> --stacked`): hitting it doesn't abort the run — it sets `review_loop.delivery.capped = true` and still opens the delivery PR with the unresolved must-fix items as a punch list. See [workflow-guide.md § Stacked-pr review mode](./workflow-guide.md#stacked-pr-review-mode).
+
 ## 8. PR title / body format
 
 The conductor's Stage 4 specifies `Title format: <TICKET>: <brief title>`. To use a different convention (e.g., your repo's conventional-commit style):
@@ -108,3 +110,4 @@ The conductor's Stage 4 specifies `Title format: <TICKET>: <brief title>`. To us
 - The 2-checkpoint structure. Adding or removing human checkpoints fundamentally changes the workflow contract; it's not parameterized.
 - The fresh-context per-stage model. Stages are isolated subagents intentionally — see [workflow-guide.md § Token-optimization design](./workflow-guide.md#token-optimization-design-why-the-workflow-looks-like-this).
 - The verify-script contract (markers, exit codes, --quick mode). The skill assumes them; breaking them breaks the workflow.
+- The 6-stage shape. Stacked-pr review mode (`--stacked`) is a *mode* of the existing review loop (Stage 5), selected by the `review_loop.review_mode` discriminator — not a new stage. It reuses the same lanes, triage, and `scripts/verify.sh` gate, and adds no new required dependencies (just the `gh` CLI the loop already uses). The non-invasive guarantee (target PR provably untouched) and the separate delivery PR are part of the mode's contract, not knobs.

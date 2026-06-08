@@ -13,6 +13,9 @@ You triage the review team's comments and decide what gets fixed in this round.
 - `WORKSPACE`: workspace dirname (e.g. `PROJ-123` in ticket mode, `_pr-123` in PR-only review mode).
 - `TICKET` _(optional)_: tracker ticket ID, used only for tracker subtask creation in "later" triage.
 - `ROUND`: review round number.
+- `review_mode` _(optional)_: `in_place` (default) or `stacked`. The conductor passes this on every Stage 5 call. It selects the coordination channel:
+  - `in_place` — read findings from PR review comments, reply on each thread, create tracker subtasks for "later" (the behavior documented below as the default).
+  - `stacked` — read findings from the workspace findings record, write classifications to the workspace triage record, post **nothing** to any PR (the target PR is never mutated — see brief decision 2). Stacked mode is always PR-only-shaped (no `TICKET`); it uses the same `_pr-<N>` workspace as PR-only in-place review.
 
 **Preconditions** (apply in order — each check assumes the prior ones passed; mirrors `pr-review-orchestrator` since both skills are reachable directly via `/feature-review` and must enforce their own input contract per the brief's defensive-validation decision):
 
@@ -20,12 +23,18 @@ You triage the review team's comments and decide what gets fixed in this round.
 - `WORKSPACE` MUST NOT contain whitespace or control characters. If `WORKSPACE` matches `[[:space:]]` or `[[:cntrl:]]`, abort with: `pr-triage: WORKSPACE must not contain whitespace or control characters, got: <repr(value)>.` (Checked BEFORE the charset regex as defense in depth — independent of regex-engine quirks around `\s` semantics. High-Unicode characters are rejected by the next bullet's charset regex.)
 - `WORKSPACE` MUST match `^[A-Za-z0-9_-]+$`. If not matched, abort with: `pr-triage: WORKSPACE must match ^[A-Za-z0-9_-]+$, got: <value>.`
 - In PR-only mode (`TICKET` not set), `WORKSPACE` MUST additionally match `^_pr-[0-9]+$`. If not matched, abort with: `pr-triage: WORKSPACE must match ^_pr-[0-9]+$ for PR-only review, got: <value>.`
+- **Stacked-mode invariant** (only when `review_mode` is `stacked`): stacked mode reviews someone else's PR — there is no ticket. `TICKET` MUST NOT be set. If `TICKET` is set with `review_mode=stacked`, abort with: `pr-triage: review_mode=stacked is PR-only and must not carry a TICKET, got TICKET=<value>.` (Together with the PR-only shape check above, this mirrors `pr-review-orchestrator`'s stacked precondition so both skills enforce the same contract.)
 - **Cross-check** (only when `TICKET` is set): if `WORKSPACE` matches `^_pr-[0-9]+$`, the two signals disagree — abort with: `pr-triage: TICKET and WORKSPACE shape disagree — TICKET is set but WORKSPACE matches the PR-only shape (^_pr-[0-9]+$). Pass exactly one consistent pair.`
 - **Ticket-mode invariant** (only when `TICKET` is set): `WORKSPACE` MUST equal `TICKET`. If not, abort with: `pr-triage: in ticket mode, WORKSPACE must equal TICKET, got WORKSPACE=<value>, TICKET=<value>.` (Together with the cross-check above, this restores the structural namespace disjointness the two-field design guaranteed by construction.)
 
 Workspace path: `WS = .claude/features/<WORKSPACE>/`.
 
-## Steps
+## Mode dispatch
+
+- If `review_mode` is `stacked`, follow **[Stacked mode](#stacked-mode-workspace-file-triage)** below and STOP — do not run the in-place steps 1–6, which read and reply to PR comments.
+- Otherwise (`review_mode` absent or `in_place`), run the in-place steps 1–6 exactly as written. This is the default and is unchanged.
+
+## Steps (in-place mode)
 
 ### 1. Fetch all review comments and thread state
 
@@ -133,7 +142,7 @@ Reply format examples:
 
 ### 5. Return the triage result
 
-Output a JSON object (printed to stdout, parseable by the caller):
+Output a JSON object (printed to stdout, parseable by the caller). The **in-place** shape:
 
 ```json
 {
@@ -148,15 +157,72 @@ Output a JSON object (printed to stdout, parseable by the caller):
 }
 ```
 
-`thread_id` is required on every `will_fix` entry — the fix subagent uses it to resolve the GitHub review thread after applying the fix, which is how subsequent rounds know the finding is "handled, awaiting verification."
+`thread_id` is required on every in-place `will_fix` entry — the fix subagent uses it to resolve the GitHub review thread after applying the fix, which is how subsequent rounds know the finding is "handled, awaiting verification."
+
+**Return-shape contract by mode** — the caller relies on `{will_fix, wont_fix, later}` being present in both modes; only the per-item locator differs:
+
+| Field             | in_place                                                                 | stacked                                                                       |
+| ----------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `will_fix[]`      | `{ comment_id, thread_id, path, line, summary }` — `thread_id` for resolve | `{ id, path, line, summary }` — workspace finding `id` (no `thread_id`)        |
+| `wont_fix[]`      | `{ comment_id, summary }`                                                | `{ id, path, line, summary }`                                                 |
+| `later[]`         | `{ comment_id, tracker_url, summary }`                                   | `{ id, path, line, summary }` — no `tracker_url` (no subtask created)         |
+
+In stacked mode there is no GitHub `thread_id`; the fixer locates the change by the workspace finding `id` plus `path:line`, and marks resolution by updating the finding's entry in `triage.json` (not via `resolveReviewThread`). See `${CLAUDE_PLUGIN_ROOT}/references/lane-tags.md` for the `triage.json` record shape.
 
 ### 6. Update state.json
 
 Append this triage result to `<WS>/state.json:review_loop.rounds[<round-1>].triage`.
 
+## Stacked mode (workspace-file triage)
+
+Run this section **only** when `review_mode` is `stacked`. The target PR is never touched: **zero** PR replies, **zero** `gh api .../comments` reads, **zero** `gh api .../replies` posts, **zero** resolve/unresolve mutations. The findings come from the workspace findings record `pr-review-orchestrator` wrote, and the classifications go back to a workspace triage record. The lane tags and classification criteria are identical to in-place mode — only the transport changes.
+
+Record shapes (`findings.json`, `triage.json`) are defined once in `${CLAUDE_PLUGIN_ROOT}/references/lane-tags.md` ("Workspace-file coordination" section). Reference them; do not redefine field names here.
+
+### S1. Read findings from the workspace
+
+```bash
+# Findings written by pr-review-orchestrator in stacked mode — NOT gh api .../comments.
+test -f "<WS>/findings.json" || { echo "pr-triage: <WS>/findings.json not found — orchestrator did not write findings"; exit 1; }
+```
+
+Parse `<WS>/findings.json` as an array of finding objects (`id`, `lane`, `path`, `line`, `body`, `round` — see lane-tags.md).
+
+**Filter** (the workspace analogue of in-place's filter; far simpler because there are no PR threads, no replies, and no spoofing surface — the file is written only by our own orchestrator subagent):
+
+1. Consider only findings for the current `ROUND` (the orchestrator's Step A re-review appends fresh findings per round; earlier-round findings already have a `triage.json` entry).
+2. Drop any finding whose `body` is the clean-lane sentinel `No issues found in this lane.` — these are records confirming a lane ran clean (in stacked mode the orchestrator appends one per clean lane at the end of its Step B), not actionable findings. This mirrors the in-place filter's `[<lane>] No issues found` drop, so a clean-lane sentinel never flows into S2 classification.
+3. Skip any finding `id` that already has a decision in `<WS>/triage.json` from a prior round — never re-classify or escalate a prior decision (mirrors the in-place "don't rewrite history" rule).
+4. If after filtering there are **zero** new findings, write nothing new to `triage.json` and return an empty triage result. Do not invent placeholder entries.
+
+There is no `bot_identity` check in stacked mode: nothing is read from or written to the PR, so there is no reply-author to authenticate. (The in-place `bot_identity` / `valid_thread_ids` machinery is untouched and applies to in-place mode only.)
+
+### S2. Classify each finding
+
+Apply the **same** classification table and lean-toward heuristics as in-place [step 2](#2-classify-each-comment): will-fix / won't-fix / later, leaning will-fix for `correctness`/`security`, later for large `arch` refactors, won't-fix for unsupported `ux` nits.
+
+### S3. Write classifications to the workspace triage record
+
+For each classified finding, append a triage decision object to `<WS>/triage.json` (and mirror a human-readable line to `<WS>/triage.md`). Per-entry fields per lane-tags.md: `id` (the `findings.json` id), `lane`, `path`, `line`, `classification` (`will-fix` / `won't-fix` / `later`, no brackets), `rationale` (the one-to-two-sentence reasoning that would have been the PR reply body), `round`.
+
+Persist a `rationale` for **every** decision — won't-fix and later rationales are the source material for the delivery PR's "what was deliberately not changed" section (Task 8). Do not post these anywhere on the PR.
+
+### S4. Skip tracker-subtask creation
+
+Stacked mode has no `TICKET` (it reviews someone else's PR), so — exactly as PR-only in-place mode does today — **do not** create tracker subtasks for `later` items. The `later` finding's `rationale` in `triage.json` is its durable record; the delivery-PR step will surface it. Don't claim anything is "tracked elsewhere."
+
+### S5. Return the triage result
+
+Output the same `{round, will_fix, wont_fix, later}` JSON object as in-place, using the **stacked** per-item shape from the return-shape contract table in step 5: `will_fix[]` entries carry the workspace finding `id` + `path` + `line` + `summary` (no `thread_id`); `wont_fix[]` and `later[]` carry `id` + `path` + `line` + `summary` (no `tracker_url`).
+
+### S6. Update state.json
+
+Same as in-place [step 6](#6-update-statejson): append this triage result to `<WS>/state.json:review_loop.rounds[<round-1>].triage`.
+
 ## Constraints
 
-- **Reply to every comment** — never silently drop one. The author deserves to see the reasoning.
-- **One issue, one comment** is the input contract. If a single comment bundles three issues, triage all three together but reply once with all three decisions.
-- **Don't escalate later → will-fix** mid-loop. If you decide "later" and then realize it's actually blocking, file a fresh comment for the next round; don't rewrite history.
-- For ambiguous comments, ask the conductor — but lean toward `will-fix` for correctness lanes and `later` for arch lanes when in doubt.
+- **Reply to every comment** _(in-place mode)_ — never silently drop one. The author deserves to see the reasoning. In stacked mode the equivalent rule is: classify every finding and write a `rationale` for each into `triage.json`.
+- **One issue, one comment / one finding** is the input contract. If a single comment/finding bundles three issues, triage all three together but record one decision with all three.
+- **Don't escalate later → will-fix** mid-loop, in either mode. If you decide "later" and then realize it's actually blocking, raise it fresh in the next round; don't rewrite a prior decision.
+- For ambiguous comments/findings, ask the conductor — but lean toward `will-fix` for correctness lanes and `later` for arch lanes when in doubt.
+- **Stacked mode never mutates the target PR**: no replies, no comments, no `gh api .../replies`, no resolve/unresolve. The only durable record is the workspace `triage.json` / `triage.md`; the only externally-visible artifact is the eventual delivery PR (brief decision 2).
