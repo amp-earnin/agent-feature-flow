@@ -285,13 +285,29 @@ This step runs **once**, after the stacked loop exits (clean or capped), and onl
 
 5. **Add the target PR's author as reviewer**, with a graceful no-fail fallback. Resolve the author login from the target PR (`gh pr view <target_pr_number> --json author -q .author.login`). Request them as reviewer — either `gh pr create --reviewer <login>` on the create call above, or `gh pr edit <delivery pr> --add-reviewer <login>` after. **If adding the reviewer fails** — most commonly because the author is the runner (you cannot review your own PR) or lacks repo access — **do NOT fail the delivery step**. Instead note it in the PR body (e.g. append: `_Could not auto-request @<login> as reviewer (<reason, e.g. author is the PR creator>); please add them manually._`) and continue. The delivery PR must still be created.
 
-6. **Persist delivery metadata** into `state.json:review_loop.delivery` on PR creation: set `branch` (already set by the fixer), `pr_url`, `pr_number`, `targets_head_branch` (already set by the gate — leave as-is), `target_pr_number` (already set — leave as-is), and `capped` (already set by the loop exit — leave as-is). These match the Task 1 schema (`{ branch, pr_url, pr_number, targets_head_branch, target_pr_number, capped }`). Set `review_loop.status = "complete"`.
+6. **Persist delivery metadata** into `state.json:review_loop.delivery` on PR creation: set `branch` (already set by the fixer), `pr_url`, `pr_number`, `targets_head_branch` (already set by the gate — leave as-is), `target_pr_number` (already set — leave as-is), and `capped` (already set by the loop exit — leave as-is). These match the Task 1 schema (`{ branch, pr_url, pr_number, targets_head_branch, target_pr_number, capped }`). Set `review_loop.status = "complete"` and `review_loop.exit_reason = "delivered"` — the single stacked exit reason for both the clean and the capped path (the cap is conveyed by `delivery.capped`, never by a separate `exit_reason`).
 
 7. Proceed to checkpoint 2, which surfaces the delivery PR URL alongside the target PR URL.
 
 ### ⏸ Human checkpoint 2
 
-Notify the human (text output to the user) with the PR URL, round count, and the lists of won't-fix + later items so they have full context for final review. Ask: _Merge_, _Iterate_, _Abandon_.
+Dispatch on `review_loop.exit_reason`. The in-place exit reasons are unchanged; stacked mode (`exit_reason === "delivered"`) gets its own framing because there is no merge decision on the target PR — the externally-visible artifact is the **delivery PR**.
+
+**In-place mode** (`exit_reason` ∈ `clean` | `max_rounds_exhausted` | `unpushable`) — unchanged. Notify the human (text output to the user) with the PR URL, round count, and the lists of won't-fix + later items so they have full context for final review. Ask: _Merge_, _Iterate_, _Abandon_. (The slash command's checkpoint-2 dispatch refines the option set per exit reason — see `.claude/commands/feature-review.md`.)
+
+**Stacked mode** (`exit_reason === "delivered"`) — never offer _Merge_; we never merge the target PR. Notify the human (text output to the user) and always surface:
+
+- the **delivery PR URL** (`review_loop.delivery.pr_url`),
+- the **target PR URL** (`stages.pr.url` — the PR under review),
+- the **round count** (`review_loop.round`),
+- the **won't-fix and later lists** (from `<WS>/triage.json`, the same source the delivery PR body used), and
+- the **capped status** (`review_loop.delivery.capped` — `true` means the round cap was hit and the delivery PR carries an unresolved must-fix punch list).
+
+Ask: _Done (delivery PR open)_, _Iterate (drive another round on the delivery branch)_, _Abandon (close the delivery PR)_.
+
+- _Done_: the delivery PR is the deliverable; the target PR author owns whether to take the fixes. Nothing more to do.
+- _Iterate_: re-enter Stage 5's stacked loop against the existing delivery branch (`review_loop.delivery.branch`) — another review→triage→fix pass on the **delivery** branch, never the target. Re-review reads the workspace findings against the new delivery HEAD.
+- _Abandon_: close the delivery PR (`gh pr close <review_loop.delivery.pr_number>`). The target PR remains provably untouched.
 
 ## Behaviors
 

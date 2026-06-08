@@ -38,11 +38,16 @@ Argument: **$ARGUMENTS**
    In `review_mode=stacked` the loop runs at full fidelity but **never mutates the target PR** (no comments, no commits to its head): the reviewer↔triage↔fixer loop coordinates entirely in the workspace, and the agreed fixes are delivered as a separate, reviewable PR. The conductor owns all of that behavior — this command only selects the mode.
 
 4. **Surface human checkpoint 2**: when the conductor returns, dispatch on `review_loop.exit_reason`:
+
+   **In-place exit reasons** (`review_mode=in_place` — unchanged):
    - `"clean"`: loop converged. Options: _Merge_ / _Iterate_ / _Abandon_.
    - `"max_rounds_exhausted"` AND `pr.owns_branch === true` (ticket mode, or PR-only mode on an in-repo branch): options remain _Merge_ / _Iterate_ / _Abandon_ — the human can choose to drive another round manually if they think the remaining will-fix items are addressable. Surface the remaining `will_fix` as a punch list in the question context so the human has full information.
    - `"unpushable"` (fork PR or no-push-rights): options _Approve_ / _Request changes (relay punch list)_ / _Abandon_. _Iterate_ is **not** offered because we cannot push fixes — the PR author must do that, on their fork.
 
-   Always pass the PR URL, round count, won't-fix list, and later list in the question context.
+   For the in-place reasons, always pass the PR URL, round count, won't-fix list, and later list in the question context.
+
+   **Stacked exit reason** (`review_mode=stacked`):
+   - `"delivered"`: the loop finished and the separate delivery PR was opened — the target PR was never mutated. **Never offer _Merge_** (we never merge the target). Options: _Done (delivery PR open)_ / _Iterate (drive another round on the **delivery** branch)_ / _Abandon (close the delivery PR)_. Always surface in the question context: the **delivery PR URL** (`review_loop.delivery.pr_url`), the **target PR URL** (`stages.pr.url`), the **round count**, the **won't-fix and later lists**, and the **capped status** (`review_loop.delivery.capped` — `true` means the round cap was hit and the delivery PR carries an unresolved must-fix punch list). The cap is conveyed by `delivery.capped`, not by a separate exit reason.
 
 ## Direct callers
 
