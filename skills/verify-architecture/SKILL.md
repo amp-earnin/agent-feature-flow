@@ -24,7 +24,7 @@ For deeper customization advice — stack-specific failure→action recipes, how
 ## When to invoke
 
 - At the end of every task in `tasks.md` (before committing the task).
-- After any fix in the review loop, before pushing.
+- After any fix in the review loop, before pushing. This is the same gate in both review modes: in stacked mode the fix-subagent runs `bash scripts/verify.sh` before committing on the delivery branch and pushing it, exactly as the in-place loop does before pushing the PR head — the contract here is reused unchanged.
 - Whenever you suspect drift after a large edit.
 
 ## Steps

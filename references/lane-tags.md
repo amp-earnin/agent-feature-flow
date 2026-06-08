@@ -74,9 +74,12 @@ fix-subagent. An array of triage decision objects:
 | `classification` | string  | One of the triage tags above (`will-fix` / `won't-fix` / `later`), without the brackets.                 |
 | `rationale`      | string  | The reasoning that would have been the triage reply body. won't-fix / later rationales feed the delivery PR's "what was deliberately not changed" section. |
 | `round`          | integer | Round the decision was made in.                                                                          |
+| `resolved`       | boolean | Set by the fix-subagent. `true` once a `will-fix` finding's fix has been applied, verified, committed, and pushed on the delivery branch. Absent/`false` until then; the stacked-mode analogue of `resolveReviewThread`. won't-fix / later entries leave it `false`. |
 
-In stacked mode the fixer marks a finding resolved by updating its triage record entry
-in `triage.json` — **not** by calling `resolveReviewThread` on the target PR.
+In stacked mode the fixer marks a finding resolved by setting `resolved = true` on its
+triage record entry in `triage.json` — **not** by calling `resolveReviewThread` on the
+target PR. Step A re-review reads `resolved` against the new delivery HEAD and clears it
+back to `false` (re-raising the finding) if the fix did not actually land.
 
 ## Why this matters
 
