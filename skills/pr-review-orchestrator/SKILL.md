@@ -123,6 +123,8 @@ Prompt structure for each reviewer (substitute the lane-specific guidance):
 >
 > **Step B — find new issues** in your lane in the diff. Do not comment on other lanes' concerns. In PR-only mode, do not flag missing-brief or scope-ambiguity issues — assume the PR's stated scope is the truth.
 >
+> **Ground regression/bug claims in source or docs**: before asserting (in Step A or Step B) that a change is a regression or a bug, verify it against the installed library source or official docs — do not claim a regression by reasoning about the diff in a vacuum; if you cannot ground it, downgrade to a question or drop it.
+>
 > **Post each new issue as an inline file comment anchored to a specific line in the diff.** Use the GitHub Pull Request Review Comments API — NOT `gh pr review --comment`, which creates a top-level review body that the triage step cannot read.
 >
 > For each finding, run:
@@ -175,6 +177,8 @@ Substitute the lane-specific guidance into this prompt:
 > 5. **If the fix is missing, partial, or wrong**: append a NEW finding to `<WS>/findings.json` with a fresh unique `id`, `lane=<lane>`, the same `path`, the current `line`, `round=<ROUND>`, and a `body` of the form `Fix from round <PRIOR_ROUND> not landed (re-review at round <ROUND>): <1–2 sentences on what is still wrong>`. This re-raised finding flows through this round's triage exactly like any other new finding. Do NOT touch the target PR. `<PRIOR_ROUND>` is the `round` recorded on the original finding's triage entry; if absent, fall back to `<ROUND> - 1` and note the inference in the body.
 >
 > **Step B — find new issues** in your lane in the diff. Do not comment on other lanes' concerns. Do not flag missing-brief or scope-ambiguity issues — assume the PR's stated scope is the truth.
+>
+> **Ground regression/bug claims in source or docs**: before asserting (in Step A or Step B) that a change is a regression or a bug, verify it against the installed library source or official docs — do not claim a regression by reasoning about the diff in a vacuum; if you cannot ground it, downgrade to a question or drop it. In stacked mode this matters most: the only externally-visible output is the delivery PR body, so an unverified regression claim ships unchallenged.
 >
 > **Record each new issue by appending one object to `<WS>/findings.json`** — never as a PR comment. For each finding, append:
 >
