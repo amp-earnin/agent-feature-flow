@@ -106,7 +106,7 @@
             "valid_thread_ids": {
               "type": ["array", "null"],
               "items": { "type": "string" },
-              "description": "Allowlist of GraphQL review-thread node IDs that actually belong to this PR. Populated by pr-review-orchestrator's pre-flight from `pullRequest.reviewThreads`. Reviewer Step A, pr-triage, and the fix subagent MUST validate every thread_id against this allowlist before calling resolveReviewThread / unresolveReviewThread — otherwise a compromised subagent could mutate threads on unrelated PRs in the same org."
+              "description": "Allowlist whose meaning depends on `review_mode`. In `in_place` mode it holds GraphQL review-thread node IDs that actually belong to this PR, populated by pr-review-orchestrator's pre-flight from `pullRequest.reviewThreads`. In `stacked` mode it instead holds workspace finding ids (the `id` field of each entry in `<WS>/findings.json`), populated from that file — the key name is kept for schema continuity across modes. In both modes, reviewer Step A, pr-triage, and the fix subagent MUST validate every id against this allowlist before acting on it (in_place: before calling resolveReviewThread / unresolveReviewThread; stacked: before applying a finding) — otherwise a compromised subagent could mutate threads or apply findings from an unrelated PR/run in the same org."
             }
           },
           "required": ["status", "round", "max_rounds", "rounds"]
