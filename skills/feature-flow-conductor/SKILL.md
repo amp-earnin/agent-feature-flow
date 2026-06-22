@@ -377,7 +377,71 @@ This step runs **once**, after the stacked loop exits (clean or capped), and onl
 
    The assembled message routes through the **Outbound redaction chokepoint** (so it carries only code-change descriptions — never raw diff, file content, or quoted comment text) before sending, and the send is **best-effort** (retry once, then continue; a failed Slack post never blocks delivery or checkpoint 2).
 
-8. Proceed to checkpoint 2, which surfaces the delivery PR URL alongside the target PR URL.
+8. Proceed to the next step. When `interactive=true`, the **Monitoring loop on the delivery PR** below runs (composed with checkpoint 2). When `interactive` is not set, proceed directly to checkpoint 2, which surfaces the delivery PR URL alongside the target PR URL.
+
+#### Monitoring loop on the delivery PR (interactive only)
+
+Runs **only when `interactive=true`** (which implies `review_mode === "stacked"`), and **only after** the stacked convergence loop has produced the delivery PR via the **Stacked-mode delivery step** above (`review_loop.delivery.pr_number` / `pr_url` are populated). It is part of **Stage 5** — **not** a new workflow stage — and is **composed with checkpoint 2**, not run in place of it: the loop watches the delivery PR for human comments and turns each into an actionable multiple-choice exchange, while the human still owns the eventual outcome (Done / Iterate / Abandon). It introduces **no new `stage` value and no new `exit_reason`**; the merge/close terminal exits (filled in by a later task) reuse `exit_reason = "delivered"`.
+
+##### Execution model — one poll cycle per invocation, re-entrant (Task 10)
+
+The monitoring loop is **NOT a daemon** and **NOT a blocking in-process sleep**. Every stage of this workflow runs as a fresh-context subagent with no long-lived process and no sleep primitive, so the loop cannot busy-wait. Instead:
+
+- **One conductor invocation performs exactly ONE poll cycle**, then **returns**. A single cycle is:
+  1. **Fetch** new comments on the delivery PR (fetch + bot-filter + dedupe — see below).
+  2. **Diff** the fetched comments against `review_loop.monitoring.handled_comment_ids` to isolate genuinely new (or re-opened) human comments.
+  3. **Reply / apply** — for each new human comment, post a multiple-choice reply; when an awaiting comment now carries an unambiguous selection, apply the chosen fix on the delivery branch (see the selection-protocol and apply-fix steps below).
+  4. **Update `review_loop.monitoring` state** — persist `handled_comment_ids`, `awaiting_choice`, `last_activity_at`, and (when touched by a later task) `idle_pinged`, so the next cycle resumes exactly where this one stopped.
+  5. **Return with next-wake guidance** — emit a one-line note that the cycle is complete and when the next poll should occur (`review_loop.monitoring.poll_minutes` minutes from now; default `5`, overridable via `--poll` — the resolved value persisted in state), then **return control**. Do not sleep, do not spin, do not start another cycle in-process.
+- **Continuity across cycles is the EXTERNAL scheduler's job**, never an in-process sleep: a cron entry, `/loop`, a scheduled-task equivalent, or the human re-running the command drives the cadence. The conductor only ever does one cycle and hands the "call me again in N minutes" guidance back to that scheduler.
+- **Re-invocation resumes from persisted state.** Re-running `/feature-review #<PR> --stacked --interactive …` on the same PR lands in the PR-only review entry's **resume** path, which reads `review_loop.monitoring` back from `<WS>/state.json` (it does **not** re-seed it). The resumed cycle therefore continues from the persisted `handled_comment_ids`, `awaiting_choice`, `last_activity_at`, `idle_pinged`, and cadence — the loop **survives process restarts** because **all** loop bookkeeping is durable in `review_loop.monitoring` and nothing essential lives only in memory.
+
+This step establishes the cycle skeleton and the state-durability contract; the fetch/filter, selection, and apply behaviors that fill each cycle are specified next. Terminal (merge/close) exits, the one-time idle ping, the explicit delivery-PR-only invariant, and the resilience rules (best-effort Slack, GitHub backoff, concurrency lockfile) are layered on by later tasks and are intentionally not duplicated here.
+
+##### Fetch + bot-filter + dedupe new human comments (Task 11)
+
+Within a cycle, gather the candidate comments **on the DELIVERY PR** — read its number/branch from `review_loop.delivery.*` (`pr_number`, `branch`), **never** the target PR (`stages.pr.*`). Fetch all three comment surfaces on the delivery PR:
+
+- **inline (review) comments** (the per-line code comments),
+- **issue comments** (the top-level conversation comments), and
+- **reviews** (the review summaries that carry a body).
+
+Then **filter out non-human authors**. Skip a comment **iff any** of the following holds:
+
+- `user.type == 'Bot'` — GitHub's own bot classification; **or**
+- the author's login is in `review_loop.monitoring.ignored_bot_authors` — a **configurable** per-project list, **default `[]`**. Do **not** bake any vendor bot login into this prose; a login such as `coderabbitai[bot]` is only an **example** of what a consuming project might add to this list, never a hard-coded default; **or**
+- the author's login equals `review_loop.bot_identity` — the agent's own GitHub login (captured at seed time). This reuses the existing `bot_identity` field so the loop never reacts to its own multiple-choice replies; **no new identity field is introduced.**
+
+**Dedupe** the surviving human comments against `review_loop.monitoring.handled_comment_ids`: drop any whose `comment_id` is already recorded as handled. **Process the remaining new comments in `created_at` order** (oldest first) — never coalesce multiple comments into one reply; each new comment gets its own analysis and reply.
+
+**Edited-comment re-open rule.** ID-based dedupe alone is insufficient: a human may **edit** a comment that was already handled, and the edit can change their intent (including changing a selection). For each comment whose `comment_id` is already in `handled_comment_ids`, detect a later edit via a **content hash of the comment body** (or its `updated_at` timestamp) compared against what was recorded when it was handled. If it changed, **re-open it as unselected** — treat it as a new human comment for this cycle (re-analyze and re-prompt) rather than silently skipping it on the strength of its ID. An edit is never ignored just because the ID was seen before.
+
+##### Deterministic multiple-choice reply + selection protocol (Task 12)
+
+For each new (or re-opened) human comment, **analyze it** and **reply on the delivery PR** with **concrete multiple-choice options** the comment author can pick from. The reply targets the **delivery** PR only (`review_loop.delivery.pr_number`) — never the target PR.
+
+- **Explicit tokens.** Each posted option carries an **explicit selection token** under a fixed prefix — e.g. an option line begins with `option: A`, the next with `option: B`, and so on. The prefix is the entry's `reply_token_prefix` (e.g. `option:`); the tokens are the per-option discriminators (`A`, `B`, …). The reply must make plain that the author selects by replying with exactly one of these tokens.
+- **Persist the awaiting-choice item.** Record an entry in `review_loop.monitoring.awaiting_choice` shaped exactly as the schema defines: `{ comment_id, options[], reply_token_prefix }` — `comment_id` is the human comment being answered, `options[]` are the concrete options posted, and `reply_token_prefix` is the token prefix used. This is the durable record a later cycle reads to recognize the author's selection.
+- **Deterministic selection recognition.** On a later cycle, when the comment author replies under an awaiting-choice item, a selection is recognized **only when exactly one valid token** (a token matching the entry's `reply_token_prefix` and one of its `options`) is present in the author's reply.
+  - **Ambiguous** (two or more valid tokens present) **or absent** (no valid token present) ⇒ treat the reply as **"discuss"**: re-prompt (reply with clarification / the options again), and **never** fall back to a default choice. **No fix is applied without an unambiguous single-token match.**
+  - Only an exact single-token match counts as a selection and unlocks the apply-fix step below.
+- **Edited replies.** Per the edited-comment re-open rule above, if a handled comment (including one already resolved) is later edited, it is re-opened as **unselected** — the edit may carry a changed selection, so it is re-evaluated rather than honored from the stale prior state.
+
+Every reply this step posts — the initial multiple-choice prompt and every "discuss" re-prompt — is assembled and then routed through the **Outbound redaction chokepoint** (the single fail-closed step defined above) as the **last** action before the `gh pr comment` call. It therefore carries only **code-change descriptions** — never raw diff, file contents, or quoted comment text.
+
+##### Apply the chosen fix on the delivery branch (Task 13)
+
+When the author makes an **unambiguous selection** (exactly one valid token, per the protocol above) for an `awaiting_choice` entry:
+
+1. **Apply the chosen change on the delivery branch.** Operate on `review_loop.delivery.branch` only — check it out and apply the fix the selected option describes. **Never** push to, commit to, comment on, or otherwise mutate the **target** PR / its head branch; the delivery branch is the only writable ref, exactly as in the stacked fix-subagent contract above.
+2. **Verify before pushing.** Run the project's verify entrypoint — `bash scripts/verify.sh`, the **existing** gate reached through the `verify-architecture` skill (the same gate Stage 3 and the stacked fix-subagent already use — **no new verification concept**). If verify fails, do **not** push; surface the failure (and keep the comment unresolved so the next cycle can revisit) rather than pushing a red change.
+3. **Push the delivery branch only — on pass.** Only after verify passes, push `review_loop.delivery.branch` (e.g. `git push origin <delivery branch>`). **Never** push the target PR's head branch under any circumstance.
+4. **Reuse the stacked fix-subagent discipline.** This apply step does not invent a parallel fixer: it follows the same **no-mutation / delivery-branch-only / push-then-record** discipline as the **stacked fix-subagent contract** in the convergence loop above. The same prohibitions apply verbatim — no `gh pr comment`, no review/reply, and no `resolveReviewThread`/`unresolveReviewThread` mutation against the target PR.
+5. **Record handled + resolved in the workspace.** After the fix lands (push succeeds), record the human comment's `comment_id` in `review_loop.monitoring.handled_comment_ids`, remove its `awaiting_choice` entry, and **mark the comment resolved in the workspace records** — the stacked-mode analogue of a thread resolve, written to `<WS>/` (e.g. the triage/monitoring record), **never** as a mutation on the target PR — exactly as the existing stacked fix-subagent marks findings resolved in `<WS>/triage.json` rather than on the target. Update `review_loop.monitoring.last_activity_at` to reflect that a human comment was just handled (this also keeps the idle tracking correct across cycles).
+
+**Discuss path.** If the author's reply is "discuss" (ambiguous/absent token, or a comment that asks a question rather than selecting), do **not** apply anything: reply with reasoning / a re-prompt (routed through the **Outbound redaction chokepoint**) and **keep the entry in `awaiting_choice`**, so the loop keeps offering the choice on subsequent cycles until the author picks an unambiguous option.
+
+The merge/close terminal exits, the one-time idle ping, the explicit delivery-PR-only invariant statement, and the resilience rules (best-effort Slack with retry-once, transient-GitHub backoff, and the per-workspace concurrency lockfile) are layered onto this loop by later tasks; this step does not duplicate them.
 
 ### ⏸ Human checkpoint 2
 
