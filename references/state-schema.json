@@ -183,7 +183,7 @@
                 },
                 "github_to_slack_handles": {
                   "type": ["object", "null"],
-                  "description": "Best-effort map from GitHub username to Slack handle for @-mentioning the PR author. Null when no mapping is configured; if absent or missing an entry, post the GitHub username as plain text with no @-mention — never block the loop on a missing mapping."
+                  "description": "Best-effort map from GitHub username to Slack user ID (e.g. `U01ABC234`, the form a connector needs to render a real @-mention — not an `@handle`) for @-mentioning the PR author. Null when no mapping is configured; if absent or missing an entry, post the GitHub username as plain text with no @-mention — never block the loop on a missing mapping."
                 }
               }
             }

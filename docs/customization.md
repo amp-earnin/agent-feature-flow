@@ -109,7 +109,11 @@ The conductor's Stage 4 specifies `Title format: <TICKET>: <brief title>`. To us
 
 ### The Slack connector is optional
 
-The Slack MCP connector is an **optional, runtime-only** dependency, required for `--interactive` only. The plugin stays installable and fully usable without it — plain `--stacked` and every other flow add **zero** Slack dependency. The connector is probed at runtime in the conductor (not at command parse time) before the first Slack post; if none is configured, the interactive run fails fast there. To enable interactive review, install any Slack MCP server in the consuming environment — the conductor discovers it at runtime and references no specific connector tool name.
+The Slack MCP connector is an **optional, runtime-only** dependency, required for `--interactive` only. The plugin stays installable and fully usable without it — plain `--stacked` and every other flow add **zero** Slack dependency. The connector is probed at runtime in the conductor (not at command parse time) before the first Slack post; if none is configured, the interactive run fails fast there with the verbatim message:
+
+> `--interactive requires a Slack thread permalink (e.g. https://your.slack.com/archives/C…/p…). None was supplied.`
+
+This message is reused for the no-connector case, so it reads like a missing-argument error even when you _did_ supply a permalink — if you see it despite passing a valid Slack thread URL, the real cause is that no Slack MCP connector is configured. To enable interactive review, install any Slack MCP server in the consuming environment — the conductor discovers it at runtime and references no specific connector tool name.
 
 ### Cadence — `--poll` / `--idle`
 
@@ -133,7 +137,7 @@ The flag value overrides the default, and the resolved value is persisted so a r
 
 ### GitHub → Slack handle map
 
-`review_loop.monitoring.github_to_slack_handles` maps a PR author's GitHub login to a Slack handle for the pre-review @-mention (nullable; default `null`). If the map is absent or has no entry for the author, the loop posts the plain GitHub username with no @-mention — it never blocks the loop on a missing mapping.
+`review_loop.monitoring.github_to_slack_handles` maps a PR author's GitHub login to a Slack **user ID** (e.g. `U01ABC234`, not an `@handle`) for the pre-review @-mention (nullable; default `null`). A user ID is what the connector needs to render a real @-mention. If the map is absent or has no entry for the author, the loop posts the plain GitHub username with no @-mention — it never blocks the loop on a missing mapping.
 
 ```jsonc
 // in .claude/features/_pr-<N>/state.json, under review_loop.monitoring
