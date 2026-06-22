@@ -66,6 +66,8 @@ If your Claude Code build has marketplace auto-update disabled and `/plugin upda
 /plugin update feature-flow@feature-flow-marketplace
 ```
 
+> **Maintainer note: versioning.** This plugin intentionally omits a `version` key from `.claude-plugin/plugin.json`, which makes Claude Code cache by commit SHA — so every merge to `main` is effectively a new "version" that `/plugin update` will pick up. Revisit this choice if external adopters appear or a stable release cadence (e.g. semver tags, changelog) becomes desirable.
+
 ## Quick start
 
 After setup:
