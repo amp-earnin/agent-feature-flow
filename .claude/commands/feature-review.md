@@ -1,6 +1,6 @@
 ---
-description: Run the parallel reviewer loop on an open PR (by ticket ID or bare PR number; PR mode is review-only). Add `--stacked` for non-invasive PR review delivered as a separate PR.
-argument-hint: <TICKET-ID | PR-NUMBER> [--stacked]  e.g. ABC-1234 or #123 or #123 --stacked
+description: Run the parallel reviewer loop on an open PR (by ticket ID or bare PR number; PR mode is review-only). Add `--stacked` for non-invasive PR review delivered as a separate PR. Add `--interactive` (stacked-only, with a Slack thread permalink) to layer Slack coordination and a comment-driven fix loop on the delivery PR.
+argument-hint: <TICKET-ID | PR-NUMBER> [--stacked] [--interactive <slack-thread-url> [--poll <min>] [--idle <min>]]  e.g. ABC-1234 or #123 or #123 --stacked or #123 --stacked --interactive https://your.slack.com/archives/C.../p...
 ---
 
 You are running **stage 5 (review loop)** of the agentic feature workflow.
@@ -9,7 +9,16 @@ Argument: **$ARGUMENTS**
 
 ## Your job
 
-1. **Parse the arguments** — trim leading/trailing whitespace from `$ARGUMENTS` first, then split on whitespace into tokens. Pull out the optional **`--stacked`** flag from anywhere in the token list (token order does not matter — `#123 --stacked` and `--stacked #123` are equivalent). The single remaining token is the ticket/PR target. Then detect mode from that target token:
+1. **Parse the arguments** — trim leading/trailing whitespace from `$ARGUMENTS` first, then split on whitespace into tokens. Token order does not matter throughout this step. Pull the following out of the token list (each is order-independent — `#123 --stacked` and `--stacked #123` are equivalent):
+   - **`--stacked`** — boolean flag.
+   - **`--interactive`** — boolean flag. Opt-in; layers Slack coordination and a comment-driven fix loop onto a stacked review.
+   - **`--poll <int>`** and **`--idle <int>`** — optional integer flags (each consumes the next token as its value). Cadence overrides forwarded as raw integers; the conductor resolves them against its `5` / `30` defaults.
+
+   After removing those flags (and the values consumed by `--poll` / `--idle`), classify the remaining tokens **by presence, not format**:
+   - The **ticket/PR target** is the token matching a ticket ID (`^[A-Z][A-Z0-9]+-\d+$`) or a PR number (`^#\d+$`).
+   - Any other remaining non-flag token is the **raw Slack-target string** (a Slack thread permalink). It is recognized purely by presence — **do not** validate its format, **do not** parse it into a channel ID / thread ts, and **do not** probe for a connector. The command only selects the mode and forwards this string verbatim; permalink format validation, channel/ts extraction, and the connector probe all happen later in the conductor, and a malformed or unreachable permalink is established as invalid at access time there, not rejected here.
+
+   Detect mode from the target token:
    - **Ticket mode**: matches `^[A-Z][A-Z0-9]+-\d+$` (e.g. `ABC-1234`). Use the existing feature workspace at `.claude/features/<TICKET>/`.
    - **PR mode**: matches `^#\d+$` (e.g. `#123`). Strip the `#`. There is no ticket and no brief — review the PR on its own merits. **The leading `#` is required** to disambiguate from purely-numeric tracker conventions (Linear, Shortcut). A bare `123` falls through to the clarify branch.
    - Anything else (no target token, more than one non-flag token, or an unrecognized target): stop and post the following message verbatim to the user, then exit:
@@ -18,7 +27,17 @@ Argument: **$ARGUMENTS**
 
    **`--stacked` is PR-mode only.** Stacked mode reviews someone else's open PR non-invasively, so it has no ticket. If `--stacked` is present in **ticket mode**, stop and post the following message verbatim to the user, then exit:
 
-     > `--stacked` reviews an open PR non-invasively and delivers fixes as a separate PR, so it needs a PR number — not a ticket. Re-run as `/feature-review #<PR> --stacked`.
+   > `--stacked` reviews an open PR non-invasively and delivers fixes as a separate PR, so it needs a PR number — not a ticket. Re-run as `/feature-review #<PR> --stacked`.
+
+   **`--interactive` syntactic gates (flag-combo validity only — NOT permalink format).** These run only when `--interactive` is present; plain `--stacked` (no `--interactive`) and every other invocation are unaffected. The checks are order-independent and are purely syntactic — the command never validates the permalink's format, never parses it into a channel ID / thread ts, and never probes for a connector. A malformed or unreachable permalink is **not** rejected here; target validity is established at access time in the conductor (the connector probe / first post), which fails with a clear runtime error if the channel/thread cannot be reached. Apply both gates:
+
+   - **(a)** If `--interactive` is present but `--stacked` is **not** present, OR the target is a ticket (ticket mode), stop and post the following message verbatim to the user, then exit:
+
+     > `--interactive requires --stacked and a bare PR number. Interactive review is only available for stacked PR review; it cannot run against a ticket target.`
+
+   - **(b)** If `--interactive` (or `--stacked`) is present but **no** Slack-thread argument was supplied (presence check only — this fires solely for a _missing_ argument, never for a malformed/unparseable permalink), stop and post the following message verbatim to the user, then exit:
+
+     > `--interactive requires a Slack thread permalink (e.g. https://your.slack.com/archives/C…/p…). None was supplied.`
 
 2. **Verify prerequisite**:
    - Ticket mode: confirm an open PR exists for this ticket — either `state.json:pr.url` is populated, or `gh pr view` on the current branch returns an open PR. If not, stop and tell the user:
@@ -32,6 +51,13 @@ Argument: **$ARGUMENTS**
 3. **Invoke the conductor** with `start_stage=review_loop`, `mode=only`, and either:
    - Ticket mode: `TICKET=<ticket>` — the conductor seeds upstream stages as complete using the existing brief and PR. `review_mode=in_place` (the default; ticket runs are always in-place).
    - PR mode: `PR=<number>` (no TICKET). The conductor handles workspace seeding, PR-context persistence, branch-ownership detection, and the review loop. Pass `review_mode=stacked` when the `--stacked` flag was parsed in step 1; otherwise `review_mode=in_place` (the default).
+
+   When `--interactive` was parsed in step 1 (PR mode, having passed the gates above), additionally forward the interactive inputs as **raw values** — the command does not transform them:
+   - `interactive=true`.
+   - the raw Slack-target string, exactly as supplied (the conductor extracts the channel ID / thread ts and proves reachability by access — see its Slack-target parsing and connector-probe steps).
+   - `poll=<int>` and/or `idle=<int>` when those flags were supplied, as raw integers (the conductor resolves them against its `5` / `30` defaults and persists the result).
+
+   The command forwards these and stops there: it implements no loop behavior, no permalink parsing, and no connector probe — those belong to the conductor.
 
    The conductor runs the convergence loop: reviewers → triage → if will-fix is empty exit clean, else apply fixes and re-review, up to `max_rounds` (default 5). The auto-fix-and-re-review step is gated on whether we own the head branch — if the PR is from a fork or otherwise un-pushable, the loop exits after one round with the will-fix list surfaced to the human as a punch list.
 
