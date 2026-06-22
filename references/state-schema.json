@@ -154,14 +154,23 @@
                 },
                 "awaiting_choice": {
                   "type": "array",
-                  "description": "Comments that have been replied to with multiple-choice options and are awaiting an unambiguous author selection. A selection is recognized only when exactly one valid token is present in the reply.",
+                  "description": "Comments that have been replied to with multiple-choice options and are awaiting an unambiguous author selection. A selection is recognized only when exactly one valid token is present in a reply authored by `commenter_login` (the original commenter). An open entry's `comment_id` is also excluded from re-prompting by the dedupe step, so an unanswered prompt is not re-posted every poll cycle.",
                   "items": {
                     "type": "object",
-                    "required": ["comment_id", "options", "reply_token_prefix"],
+                    "required": [
+                      "comment_id",
+                      "commenter_login",
+                      "options",
+                      "reply_token_prefix"
+                    ],
                     "properties": {
                       "comment_id": {
                         "type": "integer",
-                        "description": "GitHub comment ID this awaiting-choice entry tracks."
+                        "description": "GitHub comment ID of the original human comment this awaiting-choice entry tracks (the comment that was prompted, NOT the selection reply). A later reply is linked back to this entry via its `in_reply_to_id` / review-thread linkage."
+                      },
+                      "commenter_login": {
+                        "type": "string",
+                        "description": "GitHub login of the human who authored the original comment. Author binding: a selection token is accepted ONLY from a reply authored by this login (else treated as 'discuss'), so a third party cannot trigger an auto-fix + push on a public delivery PR. Mirrors the `bot_identity` spoofing defense."
                       },
                       "options": {
                         "type": "array",
