@@ -49,16 +49,22 @@ After install, complete the [consumer setup checklist](./references/consumer-set
 
 ## Updating
 
-To pull in a newer published version of the plugin:
+To pull in the latest published version of the plugin:
+
+```
+/plugin update feature-flow@feature-flow-marketplace
+```
+
+This refreshes the marketplace catalog from `amp-earnin/agent-feature-flow` and installs the newest version in one step.
+
+For users with marketplace auto-update enabled, no manual step is needed — new versions are picked up at Claude Code startup. To enable it, run `/plugin`, open the **Marketplaces** tab, select `feature-flow-marketplace`, and toggle **Enable auto-update**.
+
+If your Claude Code build has marketplace auto-update disabled and `/plugin update` does not see the new version, refresh the catalog manually first:
 
 ```
 /plugin marketplace update feature-flow-marketplace
-/plugin install feature-flow@feature-flow-marketplace
+/plugin update feature-flow@feature-flow-marketplace
 ```
-
-The first command refreshes the marketplace catalog from `amp-earnin/agent-feature-flow`; the second picks up the new version.
-
-To skip this step on future updates, run `/plugin`, open the **Marketplaces** tab, select `feature-flow-marketplace`, and toggle **Enable auto-update** — new versions will be picked up at Claude Code startup.
 
 ## Quick start
 
