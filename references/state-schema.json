@@ -65,7 +65,13 @@
             },
             "exit_reason": {
               "type": ["string", "null"],
-              "enum": ["clean", "unpushable", "max_rounds_exhausted", "delivered", null],
+              "enum": [
+                "clean",
+                "unpushable",
+                "max_rounds_exhausted",
+                "delivered",
+                null
+              ],
               "description": "How the loop exited. In-place mode (`review_mode = 'in_place'`) uses 'clean': will_fix empty, PR ready to merge; 'unpushable': head branch is on a fork or otherwise un-pushable, will-fix surfaced as a punch list; 'max_rounds_exhausted': hit max_rounds with unresolved will-fix, in modes where we own the branch the user can still choose to iterate. Stacked mode (`review_mode = 'stacked'`) uses 'delivered': the loop finished (cleanly OR after hitting the round cap) and the separate delivery PR was opened — the target PR was never mutated. Whether the cap was hit is conveyed by `delivery.capped`, NOT by a separate exit reason. Null while the loop is in progress."
             },
             "delivery": {
@@ -107,6 +113,79 @@
               "type": ["array", "null"],
               "items": { "type": "string" },
               "description": "Allowlist whose meaning depends on `review_mode`. In `in_place` mode it holds GraphQL review-thread node IDs that actually belong to this PR, populated by pr-review-orchestrator's pre-flight from `pullRequest.reviewThreads`. In `stacked` mode it instead holds workspace finding ids (the `id` field of each entry in `<WS>/findings.json`), populated from that file — the key name is kept for schema continuity across modes. In both modes, reviewer Step A, pr-triage, and the fix subagent MUST validate every id against this allowlist before acting on it (in_place: before calling resolveReviewThread / unresolveReviewThread; stacked: before applying a finding) — otherwise a compromised subagent could mutate threads or apply findings from an unrelated PR/run in the same org."
+            },
+            "monitoring": {
+              "type": ["object", "null"],
+              "default": null,
+              "description": "Interactive stacked-review only (`review_mode = 'stacked'` plus the `--interactive` flag). Durable bookkeeping for the Slack-coordinated, comment-driven monitoring loop on the delivery PR. Null in `in_place` mode and in plain `--stacked` runs; every field is nullable/defaulted so existing states validate unchanged. Not in `required`. The loop reuses `bot_identity` (above) to filter the agent's own comments — no separate field. All loop state persists here so the re-entrant, one-cycle-per-invocation poll loop survives process restarts and resumes from persisted state.",
+              "properties": {
+                "channel_id": {
+                  "type": ["string", "null"],
+                  "description": "Slack channel ID extracted from the `archives/<ID>` segment of the thread permalink by the conductor. Null until extracted (or if unextractable — target validity is proven by access, not format)."
+                },
+                "thread_ts": {
+                  "type": ["string", "null"],
+                  "description": "Slack thread timestamp extracted from the permalink's trailing `p<digits>` token (decimal inserted 6 digits from the end) or a `thread_ts` query parameter. Null until extracted."
+                },
+                "poll_minutes": {
+                  "type": "integer",
+                  "default": 5,
+                  "description": "Minutes between monitoring poll cycles. Resolved from the `--poll` flag overriding this default; persisted so a resumed loop keeps the same cadence."
+                },
+                "idle_deadline_minutes": {
+                  "type": "integer",
+                  "default": 30,
+                  "description": "Minutes of inactivity after which a one-time idle Slack heads-up fires. Resolved from the `--idle` flag overriding this default; persisted so a resumed loop keeps the same cadence."
+                },
+                "last_activity_at": {
+                  "type": ["string", "null"],
+                  "format": "date-time",
+                  "description": "Timestamp of the last handled human comment. Updated when a new human comment is processed; drives the idle-deadline check. Null until the first activity."
+                },
+                "idle_pinged": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True once the one-time idle heads-up has been posted for the current idle window. Reset to false when a new human comment arrives, so the ping survives restarts without re-firing every cycle or never firing."
+                },
+                "handled_comment_ids": {
+                  "type": "array",
+                  "items": { "type": "integer" },
+                  "description": "GitHub comment IDs already processed by the loop. New comments are deduped against this list each cycle; an edited handled comment is re-opened as unselected via content hash / updated_at rather than silently skipped."
+                },
+                "awaiting_choice": {
+                  "type": "array",
+                  "description": "Comments that have been replied to with multiple-choice options and are awaiting an unambiguous author selection. A selection is recognized only when exactly one valid token is present in the reply.",
+                  "items": {
+                    "type": "object",
+                    "required": ["comment_id", "options", "reply_token_prefix"],
+                    "properties": {
+                      "comment_id": {
+                        "type": "integer",
+                        "description": "GitHub comment ID this awaiting-choice entry tracks."
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "The concrete multiple-choice options posted for the comment author to select from."
+                      },
+                      "reply_token_prefix": {
+                        "type": "string",
+                        "description": "Token prefix (e.g. `option:`) that prefixes each posted option; a reply must contain exactly one valid token under this prefix to be a selection."
+                      }
+                    }
+                  }
+                },
+                "ignored_bot_authors": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "default": [],
+                  "description": "Configurable GitHub logins to skip when fetching new comments (in addition to `user.type == 'Bot'` and the agent's own `bot_identity`). Defaults to empty; bot logins are configured per project, never baked into core prose."
+                },
+                "github_to_slack_handles": {
+                  "type": ["object", "null"],
+                  "description": "Best-effort map from GitHub username to Slack handle for @-mentioning the PR author. Null when no mapping is configured; if absent or missing an entry, post the GitHub username as plain text with no @-mention — never block the loop on a missing mapping."
+                }
+              }
             }
           },
           "required": ["status", "round", "max_rounds", "rounds"]
