@@ -21,7 +21,7 @@ Argument: **$ARGUMENTS**
    Detect mode from the target token:
    - **Ticket mode**: matches `^[A-Z][A-Z0-9]+-\d+$` (e.g. `ABC-1234`). Use the existing feature workspace at `.claude/features/<TICKET>/`.
    - **PR mode**: matches `^#\d+$` (e.g. `#123`). Strip the `#`. There is no ticket and no brief — review the PR on its own merits. **The leading `#` is required** to disambiguate from purely-numeric tracker conventions (Linear, Shortcut). A bare `123` falls through to the clarify branch.
-   - Anything else (no target token, more than one non-flag token, or an unrecognized target): stop and post the following message verbatim to the user, then exit:
+   - Anything else (no target token, an unrecognized target, or more than one non-flag token left **after** setting aside the recognized Slack-target string — i.e. a stray token that is neither the target nor the single allowed Slack permalink): stop and post the following message verbatim to the user, then exit:
 
      > `<ARG>` is not a recognized ticket ID or PR number. Expected a tracker ID like `ABC-1234`, or a PR number prefixed with `#` like `#123`.
 
