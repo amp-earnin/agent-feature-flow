@@ -207,7 +207,7 @@ The `/feature-review` command does only **syntactic** gating of `--interactive` 
 
 A malformed or unreachable permalink is **not** rejected by the command. It is established as invalid by access in the conductor (the connector probe / first post), which is also where gate error (b) doubles as the "no Slack connector configured" failure described above.
 
-#### Compliance note (EarnIn)
+#### Compliance note (outbound redaction)
 
 All outbound text — every Slack post and every delivery-PR reply — passes through a single fail-closed redaction step before it is sent. The loop posts only code-change descriptions; it never posts raw diff, file content, or quoted comment text, and on any match against the deny-set (secrets/keys/tokens, SSNs, bank/routing/card numbers, name+account combinations) it blocks the post and surfaces a heads-up rather than posting a partially-redacted artifact.
 
