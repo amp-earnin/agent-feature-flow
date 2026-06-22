@@ -154,7 +154,7 @@
                 },
                 "awaiting_choice": {
                   "type": "array",
-                  "description": "Comments that have been replied to with multiple-choice options and are awaiting an unambiguous author selection. A selection is recognized only when exactly one valid token is present in a reply authored by `commenter_login` (the original commenter). An open entry's `comment_id` is also excluded from re-prompting by the dedupe step, so an unanswered prompt is not re-posted every poll cycle.",
+                  "description": "Comments that have been replied to with multiple-choice options and are awaiting an unambiguous author selection. A selection is recognized only when exactly one valid token, under that entry's UNIQUE `reply_token_prefix`, is present in a reply authored by `commenter_login` (the original commenter); the unique prefix lets one author hold several open entries at once and select among them by distinct token. An open entry's `comment_id` is also excluded from re-prompting by the dedupe step (unless the comment was edited, in which case the edited-comment re-open rule supersedes the drop), so an unanswered prompt is not re-posted every poll cycle.",
                   "items": {
                     "type": "object",
                     "required": [
@@ -166,7 +166,7 @@
                     "properties": {
                       "comment_id": {
                         "type": "integer",
-                        "description": "GitHub comment ID of the original human comment this awaiting-choice entry tracks (the comment that was prompted, NOT the selection reply). A later reply is linked back to this entry via its `in_reply_to_id` / review-thread linkage."
+                        "description": "GitHub comment ID of the original human comment this awaiting-choice entry tracks (the comment that was prompted, NOT the selection reply). A later reply is matched back to this entry either by `in_reply_to_id` / review-thread linkage (inline review surface) or by this entry's unique `reply_token_prefix` (no-linkage issue-comment surface)."
                       },
                       "commenter_login": {
                         "type": "string",
@@ -179,7 +179,7 @@
                       },
                       "reply_token_prefix": {
                         "type": "string",
-                        "description": "Token prefix (e.g. `option:`) that prefixes each posted option; a reply must contain exactly one valid token under this prefix to be a selection."
+                        "description": "Token prefix that prefixes each posted option, UNIQUE per awaiting_choice entry (derive from this entry's `comment_id` or a short uid, e.g. `option a1b2c3d4:`). A reply must contain exactly one valid token under this prefix to be a selection. Because the prefix is unique per entry, that single token resolves to exactly one open entry regardless of how many the author has open, so there is no shared-token ambiguity or starvation."
                       }
                     }
                   }
