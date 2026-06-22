@@ -31,15 +31,16 @@ State is persisted to `.claude/features/<TICKET>/state.json` (schema: `${CLAUDE_
 
 Sometimes you don't want the full pipeline. Maybe you wrote the brief yourself and just want planning to run, or maybe Stage 3 finished a week ago and you only want to re-open the PR. Each stage has its own slash command:
 
-| Command                       | Enters at      | Default behavior                                                                                                                                                                                                      |
-| ----------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/feature-brief <TICKET>`     | gather + brief | runs Stage 1, stops at human checkpoint 1                                                                                                                                                                             |
-| `/feature-plan <TICKET>`      | plan           | runs Stage 2 only — requires `brief.md`                                                                                                                                                                               |
-| `/feature-implement <TICKET>` | implement      | runs Stage 3 only — requires `brief.md` + `tasks.md`                                                                                                                                                                  |
-| `/feature-pr <TICKET>`        | open PR        | runs Stage 4 only — requires a feature branch with commits                                                                                                                                                            |
-| `/feature-review <TICKET>`    | review loop    | runs Stage 5 + checkpoint 2 — requires an open PR for this ticket                                                                                                                                                     |
-| `/feature-review #<PR>`       | review loop    | PR-only mode — review any open PR by number; no ticket / brief required; auto-fix loop runs if `gh pr checkout` succeeds (i.e. the head branch is in this repo and we have push rights), otherwise emits a punch list |
-| `/feature-review #<PR> --stacked` | review loop | Non-invasive PR-only mode — runs the full review-fix loop without ever touching the target PR (no comments, no commits) and delivers the agreed fixes as a separate, reviewable PR with the original author looped in as reviewer. See [Stacked-pr review mode](#stacked-pr-review-mode) |
+| Command                                                            | Enters at      | Default behavior                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/feature-brief <TICKET>`                                          | gather + brief | runs Stage 1, stops at human checkpoint 1                                                                                                                                                                                                                                                                                                                                     |
+| `/feature-plan <TICKET>`                                           | plan           | runs Stage 2 only — requires `brief.md`                                                                                                                                                                                                                                                                                                                                       |
+| `/feature-implement <TICKET>`                                      | implement      | runs Stage 3 only — requires `brief.md` + `tasks.md`                                                                                                                                                                                                                                                                                                                          |
+| `/feature-pr <TICKET>`                                             | open PR        | runs Stage 4 only — requires a feature branch with commits                                                                                                                                                                                                                                                                                                                    |
+| `/feature-review <TICKET>`                                         | review loop    | runs Stage 5 + checkpoint 2 — requires an open PR for this ticket                                                                                                                                                                                                                                                                                                             |
+| `/feature-review #<PR>`                                            | review loop    | PR-only mode — review any open PR by number; no ticket / brief required; auto-fix loop runs if `gh pr checkout` succeeds (i.e. the head branch is in this repo and we have push rights), otherwise emits a punch list                                                                                                                                                         |
+| `/feature-review #<PR> --stacked`                                  | review loop    | Non-invasive PR-only mode — runs the full review-fix loop without ever touching the target PR (no comments, no commits) and delivers the agreed fixes as a separate, reviewable PR with the original author looped in as reviewer. See [Stacked-pr review mode](#stacked-pr-review-mode)                                                                                      |
+| `/feature-review #<PR> --stacked --interactive <slack-thread-url>` | review loop    | Adds Slack coordination and a comment-driven fix loop to a stacked review. Announces the review in a Slack thread, then monitors the **delivery** PR — turning each new human comment into a multiple-choice reply and applying the chosen fix. Opt-in; only valid with `--stacked` + a Slack thread permalink. See [Interactive stacked review](#interactive-stacked-review) |
 
 **Default is "only this stage."** Pass `--continue` to run that stage and everything downstream:
 
@@ -140,7 +141,7 @@ The implementation subagent applies fixes, runs `verify.sh`, commits, pushes, an
 
 Loop continues until `will-fix` is empty (and no Step-A thread was rejected) or `max_rounds` (default 5) is reached. Configure max rounds by editing `state.json:review_loop.max_rounds` before the loop starts.
 
-**Reviewer quality bar — ground regression claims in source/docs.** Before any reviewer asserts (in a first-pass review or a Step-A re-review) that a change is a *regression* or a *bug*, it must verify the claim against the installed library source or the official docs — not reason about the diff in a vacuum. If it can't ground the claim, it downgrades the finding to a question or drops it. This closes a known false-positive class where a reviewer "discovers" a regression by reasoning about agent-written code without checking that the framework already handles the case. The bar applies in every mode; it matters most in stacked mode, where the only externally-visible output is the delivery PR body, so an unverified claim would ship unchallenged.
+**Reviewer quality bar — ground regression claims in source/docs.** Before any reviewer asserts (in a first-pass review or a Step-A re-review) that a change is a _regression_ or a _bug_, it must verify the claim against the installed library source or the official docs — not reason about the diff in a vacuum. If it can't ground the claim, it downgrades the finding to a question or drops it. This closes a known false-positive class where a reviewer "discovers" a regression by reasoning about agent-written code without checking that the framework already handles the case. The bar applies in every mode; it matters most in stacked mode, where the only externally-visible output is the delivery PR body, so an unverified claim would ship unchallenged.
 
 ### Stacked-pr review mode
 
@@ -150,10 +151,69 @@ Loop continues until `will-fix` is empty (and no Step-A thread was rejected) or 
 - **Workspace-only audit trail.** Because the PR can't be the comment channel, the reviewer→triage→fixer loop coordinates entirely through workspace files under `.claude/features/_pr-<N>/` (`findings.json`, `triage.json`, `state.json`, plus `.md` mirrors for human reading). That directory is gitignored — it's a local audit trail, not a committed artifact.
 - **Delivery PR relation.** When we have push access to the target PR's head branch (it lives in this repo, not a fork), the delivery branch is **stacked on the target PR's head** and the delivery PR targets that head branch, so the author sees only the proposed fixes. When the target PR is from a fork / not push-accessible, it **falls back** to a delivery branch off our base branch with the body prominently linking the target PR.
 - **Author as reviewer.** The original PR's author is requested as a reviewer of the delivery PR, so the fixes route back to the person who owns the change. If that request can't be made (e.g. the author is the runner, or lacks repo access), the run notes it in the PR body and continues rather than failing.
-- **Self-explaining delivery.** The delivery PR body says what changed and why, what was deliberately *not* changed (the won't-fix rationales from triage), and any out-of-scope follow-ups surfaced during review (the "later" items — stacked mode files no tracker subtasks, so these live only in the PR body).
+- **Self-explaining delivery.** The delivery PR body says what changed and why, what was deliberately _not_ changed (the won't-fix rationales from triage), and any out-of-scope follow-ups surfaced during review (the "later" items — stacked mode files no tracker subtasks, so these live only in the PR body).
 - **Non-convergence is capped, not abandoned.** If the round cap is hit with must-fix items still unresolved, the run does **not** drop out without a deliverable. It sets `review_loop.delivery.capped = true` and still opens the delivery PR, with the unresolved must-fix items listed prominently as a punch list and a note that the cap was hit. This mirrors the in-place loop's `needs_human` exit but still gives the author the partial value.
 
 At checkpoint 2, stacked runs exit with `review_loop.exit_reason = "delivered"`. You're never offered _Merge_ (we never merge the target PR); the options are _Done (delivery PR open)_ / _Iterate (drive another round on the delivery branch)_ / _Abandon (close the delivery PR)_. The summary surfaces the delivery PR URL, the target PR URL, the round count, the won't-fix and later lists, and whether the run was capped.
+
+### Interactive stacked review
+
+`--interactive` layers **Slack coordination** and a **comment-driven fix loop** on top of a `--stacked` review. It is **opt-in** and only valid with `--stacked` plus a Slack thread permalink:
+
+```bash
+/feature-review #123 --stacked --interactive https://<workspace>.slack.com/archives/Cxxxxxxxxxx/pxxxxxxxxxxxxxxxx
+```
+
+What it adds on top of plain stacked mode:
+
+- **Slack-announced.** Before the reviewer team runs, it posts a reply to the configured thread announcing the review is starting and @-mentioning the PR author. After the delivery PR opens, it posts a second reply with the delivery PR link and a short changed / won't-fix / later summary (derived from the same triage data the delivery-PR body is built from).
+- **Comment-driven monitoring loop on the delivery PR.** Once the delivery PR exists, the loop watches it for new human comments. Each new comment becomes a reply with concrete **multiple-choice options**; when the author picks one (an unambiguous option token), the loop applies that change on the delivery branch, runs `scripts/verify.sh`, and pushes. Ambiguous or absent selections are treated as "discuss" and re-prompted — a fix is never applied on a guess.
+- **Never touches the target PR.** Everything above applies to the **delivery** PR / branch only. The monitoring loop reads, comments, reacts, resolves, and pushes on the delivery PR exclusively — including the careless case of a human commenting on the target PR thread, which is still answered only on the delivery PR. The target PR stays provably untouched, exactly as in plain `--stacked`.
+
+#### The Slack target
+
+The Slack target is a **full Slack thread permalink**, e.g. `https://<workspace>.slack.com/archives/Cxxxxxxxxxx/pxxxxxxxxxxxxxxxx`. The `/feature-review` command does **not** validate its format — it forwards the raw string to the conductor, which does a best-effort extraction of the channel ID and thread timestamp. **Target validity is established by access, not by format**: when the loop first needs the thread, it tries to reach the channel/thread and fails with a clear runtime error if it can't (unresolvable channel, missing thread, no permission, or an unparseable permalink). A malformed-looking permalink is not rejected up front — it simply fails at access time if it turns out to be unreachable.
+
+#### Cadence — `--poll` and `--idle`
+
+The monitoring loop is **re-entrant**: one invocation performs exactly **one poll cycle** (fetch new comments → reply / apply the chosen fix → update state → return), then returns next-wake guidance. It is **not** a daemon and does **not** sleep in-process. Continuity comes from an **external scheduler** in your environment — a cron entry, `/loop`, a scheduled-task equivalent, or just you re-running the command. Re-running `/feature-review #<PR> --stacked --interactive …` on the same PR resumes from persisted state (handled comments, awaiting-choice items, cadence, idle tracking).
+
+Two flags override the cadence defaults:
+
+| Flag           | Overrides                           | Default |
+| -------------- | ----------------------------------- | ------- |
+| `--poll <min>` | how often a cycle should run        | 5 min   |
+| `--idle <min>` | idle window before a Slack heads-up | 30 min  |
+
+Resolved values persist in `review_loop.monitoring`, so a resumed loop keeps the same cadence. If no human comment arrives within the idle window, the loop fires a **one-time** Slack heads-up to the thread (it re-arms when the next human comment lands). See [customization.md § Interactive review](./customization.md#9-interactive-review-poll-idle-and-the-slack-connector) for the configurable bot-author and handle-map knobs.
+
+#### The Slack connector is optional
+
+The Slack MCP connector is an **optional, runtime-only** dependency, required for `--interactive` only. **`feature-flow` stays fully installable and usable without it** — plain `--stacked` and every other flow add zero Slack dependency. The connector is probed **at runtime in the conductor** (the command cannot introspect MCP wiring), right before the first Slack post. If no usable connector is configured, the run **fails fast** at that point with the same message used for a missing Slack argument:
+
+> `--interactive requires a Slack thread permalink (e.g. https://your.slack.com/archives/C…/p…). None was supplied.`
+
+#### Gating and gate errors
+
+The `/feature-review` command does only **syntactic** gating of `--interactive` (flag-combo validity) and emits two verbatim gate errors:
+
+- **(a)** `--interactive` used without `--stacked`, or against a ticket target:
+
+  > `--interactive requires --stacked and a bare PR number. Interactive review is only available for stacked PR review; it cannot run against a ticket target.`
+
+- **(b)** `--interactive` / `--stacked` used with **no** Slack thread argument at all (a missing argument — _not_ a malformed permalink):
+
+  > `--interactive requires a Slack thread permalink (e.g. https://your.slack.com/archives/C…/p…). None was supplied.`
+
+A malformed or unreachable permalink is **not** rejected by the command. It is established as invalid by access in the conductor (the connector probe / first post), which is also where gate error (b) doubles as the "no Slack connector configured" failure described above.
+
+#### Compliance note (EarnIn)
+
+All outbound text — every Slack post and every delivery-PR reply — passes through a single fail-closed redaction step before it is sent. The loop posts only code-change descriptions; it never posts raw diff, file content, or quoted comment text, and on any match against the deny-set (secrets/keys/tokens, SSNs, bank/routing/card numbers, name+account combinations) it blocks the post and surfaces a heads-up rather than posting a partially-redacted artifact.
+
+#### At checkpoint 2
+
+Interactive runs are stacked runs, so they exit with `review_loop.exit_reason = "delivered"` and offer the same _Done / Iterate / Abandon_ options (never _Merge_). Merge stays a human decision — the loop never auto-merges the delivery PR. If the delivery PR is merged or closed-unmerged, the loop posts a closing Slack reply and stops (it reuses `exit_reason = "delivered"` — no new exit reason).
 
 ## Resuming a workflow
 
