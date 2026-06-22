@@ -219,6 +219,31 @@ These two checks run **only when `interactive=true`** (which implies `review_mod
 
 > **Note on the connector-abort wording.** The brief maps the "no Slack connector configured" abort to gate error (b) verbatim, even though (b)'s text reads as a _missing-argument_ message ("…None was supplied.") rather than a _missing-connector_ message. This prose follows the brief's explicit instruction (use (b) verbatim for the no-connector case) and uses the distinct, clearer access errors above for the target-inaccessible cases. If the orchestrator reconciles this against the live ticket, the no-connector abort string is the single value to revisit; do not invent a third gate-error string here.
 
+#### Outbound redaction — the single fail-closed chokepoint (interactive only)
+
+**EarnIn-compliance invariant — non-negotiable.** Every piece of outbound text that the interactive loop emits — each Slack post (pre-review, post-delivery, idle, closing) and each `gh pr comment` reply on the delivery PR (multiple-choice prompts, discussion replies) — passes through **exactly one** redaction step, and that step is the **last** thing that runs **before** the `slack_send_message` / `gh pr comment` call. There is one chokepoint, not a per-call check duplicated at each site: assemble the message, hand it to this step, and only the value it returns may be sent. Any later monitoring reply added by subsequent tasks routes through this same step — nothing reaches Slack or the delivery PR without traversing it.
+
+**What may be posted.** Only **descriptions of code changes** — a human-readable summary of what changed and why. Never the raw diff, never file contents, and never quoted comment text (do not echo a reviewer's or human's comment body back out; describe it). This keeps both customer data and untrusted PR-author text out of every outbound artifact by construction.
+
+**Deny-set.** Scan the assembled outbound text for, at minimum:
+
+- secrets, keys, and tokens (API keys, access tokens, bearer/OAuth tokens, client secrets, passwords, connection strings, private keys);
+- Social Security numbers, full **or** partial;
+- bank account, routing, debit/credit card numbers;
+- name + account-identifier combinations (a person's name adjacent to an account/card/routing identifier).
+
+Describe these categories generically; never embed a real or realistic secret/PII literal in this prose or in any example.
+
+**Fail closed on any match.** If the text matches **anything** in the deny-set, do **not** post a partially-redacted artifact. Instead: **block** the post entirely, **flag** it (record that the post was withheld for a compliance match), and **surface a heads-up** in the conductor's output to the human that an outbound message was blocked pending review. A blocked post is treated like a best-effort Slack failure for loop-continuity purposes (it never aborts the poll cycle or a fix) — but it is **never** silently dropped: the human is always told. Prefer withholding the whole message over leaking a fragment.
+
+#### Pre-review Slack post (interactive only)
+
+Runs **only when `interactive=true`**, **after** the connector probe and Slack-target access check above have succeeded, and **before** the reviewer team is spawned (i.e. before the convergence loop's first `pr-review-orchestrator` invocation). Post **one reply** to the configured thread (`review_loop.monitoring.channel_id` / `thread_ts`) announcing that the stacked review is starting on the target PR, and tag the PR author:
+
+- **Author handle (best-effort, never blocking).** Resolve the target PR author's GitHub login (already known from the PR metadata). Look it up in `review_loop.monitoring.github_to_slack_handles`; if the map is non-null and has an entry, @-mention the mapped Slack handle. If the map is `null` **or** has no entry for that login, post the **plain GitHub username as text with no @-mention**. A missing or empty mapping **never** blocks the post — it is a documented best-effort degrade, not an error.
+
+The assembled message routes through the **Outbound redaction chokepoint** above before sending, and the send is **best-effort** (a failed Slack post is retried once, then the loop continues; it never aborts the review).
+
 Loop, increment `round` per iteration. While `round < max_rounds`:
 
 1. Invoke `pr-review-orchestrator` skill (passing `WORKSPACE`, `TICKET` in ticket mode, and `review_mode`). It spawns the 4-agent review team in parallel and returns when all findings are recorded (posted as PR comments in `in_place` mode; written to the workspace findings record in `stacked` mode).
@@ -260,6 +285,8 @@ Loop, increment `round` per iteration. While `round < max_rounds`:
    > The next iteration of Stage 5's loop re-spawns reviewers; their Step A re-review reads the workspace findings record against the new **delivery HEAD** and clears `resolved` back to `false` for any finding whose fix didn't actually land (which becomes a new will-fix for the following round).
 
    Then loop — re-review the new delivery HEAD, re-triage against the workspace records, until `will_fix` is empty or `round >= max_rounds`. This is the stacked convergence loop: identical fidelity to the in-place loop (same lanes, same triage, same verify gate, same round cap), only the coordination transport and the push target differ.
+
+   **Convergence fidelity — no premature exit (applies to stacked, and a fortiori to `interactive=true`).** The stacked loop runs the **same round structure** as the normal in-place loop — **review round N → triage → fix → re-review round N+1** — and `interactive=true` does **not** change that structure (it only layers Slack posts and, after delivery, the monitoring loop on top). Each round **re-spawns the full reviewer team** (all four lanes via `pr-review-orchestrator`) against the **new delivery HEAD** and **re-triages** before deciding whether to continue. The loop terminates on **exactly two** conditions and no others: `will_fix` is empty (clean) **or** `round == max_rounds` (capped). It **MUST NOT** terminate after a single round, and **MUST NOT** exit before convergence on any other signal — a single fix pass, an empty re-review that was never actually re-spawned, or "the delivery PR is open" are **not** exit conditions. (This is the defect observed in the PoC #181→#186 run, which ended after one pass; the productized loop must not.) No new `exit_reason` is introduced by this guarantee: the clean path still exits with `will_fix` empty and the capped path is still conveyed by `review_loop.delivery.capped` (see below). The comment-driven **monitoring loop begins only after this convergence loop has produced the delivery PR** — it is layered on by the monitoring step that runs after the stacked-mode delivery step opens the delivery PR, never in place of a convergence round.
    - **Non-convergence (stacked):** on `round >= max_rounds` with non-empty `will_fix`, do NOT exit `needs_human` without a delivery PR. Instead set `review_loop.delivery.capped = true` and still proceed to delivery (Decision 5): the unresolved must-fix items are carried into the delivery PR description as a prominent punch list. The stacked exit is handled by the delivery step (a later task), not by the in-place `clean` / `unpushable` / `max_rounds_exhausted` exit reasons; the `capped` flag on `delivery` — not a separate `exit_reason` — is what conveys that the cap was hit.
 
    **In-place mode (`review_mode` absent or `=== "in_place"`) — gate on branch ownership** — read `state.json:pr.owns_branch`. Both modes set this field explicitly (ticket mode in Stage 4 step 3; PR-only mode in the PR-only entry step 6), so the check is uniform: there should never be an undefined value at this point.
@@ -341,7 +368,16 @@ This step runs **once**, after the stacked loop exits (clean or capped), and onl
 
 6. **Persist delivery metadata** into `state.json:review_loop.delivery` on PR creation: set `branch` (already set by the fixer), `pr_url`, `pr_number`, `targets_head_branch` (already set by the gate — leave as-is), `target_pr_number` (already set — leave as-is), and `capped` (already set by the loop exit — leave as-is). These match the Task 1 schema (`{ branch, pr_url, pr_number, targets_head_branch, target_pr_number, capped }`). Set `review_loop.status = "complete"` and `review_loop.exit_reason = "delivered"` — the single stacked exit reason for both the clean and the capped path (the cap is conveyed by `delivery.capped`, never by a separate `exit_reason`).
 
-7. Proceed to checkpoint 2, which surfaces the delivery PR URL alongside the target PR URL.
+7. **Post-delivery Slack post (interactive only).** Runs **only when `interactive=true`**, **after** the delivery PR has been opened (step 4) and its metadata persisted (step 6). Post **one reply** to the configured thread (`review_loop.monitoring.channel_id` / `thread_ts`) carrying the **delivery PR link** (`review_loop.delivery.pr_url`) plus a **short changed / won't-fix / later summary**. Derive that summary from the **same `<WS>/triage.json`** the delivery-PR body was built from in step 2 — **not** a second, independently-regenerated source, so the Slack summary and the PR body stay consistent. Use **counts plus one-line headlines** per bucket:
+
+   - **changed**: count of `classification = "will-fix"` entries with `resolved = true`, each summarized as a one-line headline (the fix, not the diff);
+   - **won't-fix**: count of `classification = "won't-fix"` entries, one-line headlines;
+   - **later**: count of `classification = "later"` entries, one-line headlines;
+   - when `review_loop.delivery.capped === true`, also note the count of still-unresolved must-fix items so the thread reflects the capped punch list.
+
+   The assembled message routes through the **Outbound redaction chokepoint** (so it carries only code-change descriptions — never raw diff, file content, or quoted comment text) before sending, and the send is **best-effort** (retry once, then continue; a failed Slack post never blocks delivery or checkpoint 2).
+
+8. Proceed to checkpoint 2, which surfaces the delivery PR URL alongside the target PR URL.
 
 ### ⏸ Human checkpoint 2
 
