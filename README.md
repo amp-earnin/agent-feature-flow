@@ -49,17 +49,18 @@ After install, complete the [consumer setup checklist](./references/consumer-set
 
 ## Updating
 
-To pull in the latest published version of the plugin:
+To install the latest version of the plugin from your local marketplace catalog:
 
 ```
 /plugin update feature-flow@feature-flow-marketplace
 ```
 
-This refreshes the marketplace catalog from `amp-earnin/agent-feature-flow` and installs the newest version in one step.
+`/plugin update` installs whatever version is in your cached copy of the marketplace catalog; it does not by itself fetch a fresh catalog from `amp-earnin/agent-feature-flow`. Refreshing the catalog happens in one of two ways:
 
-For users with marketplace auto-update enabled, no manual step is needed — new versions are picked up at Claude Code startup. To enable it, run `/plugin`, open the **Marketplaces** tab, select `feature-flow-marketplace`, and toggle **Enable auto-update**.
+- **Auto-update (background):** if the marketplace has auto-update enabled, Claude Code refreshes the catalog and updates installed plugins at startup. As a third-party marketplace, `feature-flow-marketplace` has auto-update **disabled by default** — you opt in per the [Anthropic plugin docs § Configure auto-updates](https://code.claude.com/docs/en/discover-plugins#configure-auto-updates): run `/plugin`, select **Marketplaces**, choose `feature-flow-marketplace`, then select **Enable auto-update**.
+- **Manual refresh:** run `/plugin marketplace update feature-flow-marketplace` to pull the latest catalog, then `/plugin update feature-flow@feature-flow-marketplace` to install.
 
-If your Claude Code build has marketplace auto-update disabled and `/plugin update` does not see the new version, refresh the catalog manually first:
+If `/plugin update` reports that you're already at the latest version but you know a newer commit has landed on `main`, your catalog is stale — run the manual refresh:
 
 ```
 /plugin marketplace update feature-flow-marketplace
