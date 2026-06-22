@@ -1,7 +1,6 @@
 {
   "name": "feature-flow",
   "description": "End-to-end agentic feature workflow: gather → plan → build → PR → review-loop → merge, driven by a single /feature <TICKET> command. Stack-agnostic; bring your own verify script and reviewer personas.",
-  "version": "0.1.0",
   "author": {
     "name": "Tassana Amp"
   },

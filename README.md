@@ -49,16 +49,25 @@ After install, complete the [consumer setup checklist](./references/consumer-set
 
 ## Updating
 
-To pull in a newer published version of the plugin:
+To install the latest version of the plugin from your local marketplace catalog:
+
+```
+/plugin update feature-flow@feature-flow-marketplace
+```
+
+`/plugin update` installs whatever version is in your cached copy of the marketplace catalog; it does not by itself fetch a fresh catalog from `amp-earnin/agent-feature-flow`. Refreshing the catalog happens in one of two ways:
+
+- **Auto-update (background):** if the marketplace has auto-update enabled, Claude Code refreshes the catalog and updates installed plugins at startup. As a third-party marketplace, `feature-flow-marketplace` has auto-update **disabled by default** — you opt in per the [Anthropic plugin docs § Configure auto-updates](https://code.claude.com/docs/en/discover-plugins#configure-auto-updates): run `/plugin`, select **Marketplaces**, choose `feature-flow-marketplace`, then select **Enable auto-update**.
+- **Manual refresh:** run `/plugin marketplace update feature-flow-marketplace` to pull the latest catalog, then `/plugin update feature-flow@feature-flow-marketplace` to install.
+
+If `/plugin update` reports that you're already at the latest version but you know a newer commit has landed on `main`, your catalog is stale — run the manual refresh:
 
 ```
 /plugin marketplace update feature-flow-marketplace
-/plugin install feature-flow@feature-flow-marketplace
+/plugin update feature-flow@feature-flow-marketplace
 ```
 
-The first command refreshes the marketplace catalog from `amp-earnin/agent-feature-flow`; the second picks up the new version.
-
-To skip this step on future updates, run `/plugin`, open the **Marketplaces** tab, select `feature-flow-marketplace`, and toggle **Enable auto-update** — new versions will be picked up at Claude Code startup.
+> **Maintainer note: versioning.** This plugin intentionally omits a `version` key from `.claude-plugin/plugin.json`, which makes Claude Code cache by commit SHA — so every merge to `main` is effectively a new "version" that `/plugin update` will pick up. Revisit this choice if external adopters appear or a stable release cadence (e.g. semver tags, changelog) becomes desirable.
 
 ## Quick start
 
