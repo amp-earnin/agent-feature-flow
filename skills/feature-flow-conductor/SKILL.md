@@ -396,7 +396,9 @@ The monitoring loop is **NOT a daemon** and **NOT a blocking in-process sleep**.
 - **Continuity across cycles is the EXTERNAL scheduler's job**, never an in-process sleep: a cron entry, `/loop`, a scheduled-task equivalent, or the human re-running the command drives the cadence. The conductor only ever does one cycle and hands the "call me again in N minutes" guidance back to that scheduler.
 - **Re-invocation resumes from persisted state.** Re-running `/feature-review #<PR> --stacked --interactive …` on the same PR lands in the PR-only review entry's **resume** path, which reads `review_loop.monitoring` back from `<WS>/state.json` (it does **not** re-seed it). The resumed cycle therefore continues from the persisted `handled_comment_ids`, `awaiting_choice`, `last_activity_at`, `idle_pinged`, and cadence — the loop **survives process restarts** because **all** loop bookkeeping is durable in `review_loop.monitoring` and nothing essential lives only in memory.
 
-This step establishes the cycle skeleton and the state-durability contract; the fetch/filter, selection, and apply behaviors that fill each cycle are specified next. Terminal (merge/close) exits, the one-time idle ping, the explicit delivery-PR-only invariant, and the resilience rules (best-effort Slack, GitHub backoff, concurrency lockfile) are layered on by later tasks and are intentionally not duplicated here.
+This step establishes the cycle skeleton and the state-durability contract; the fetch/filter, selection, and apply behaviors that fill each cycle are specified next. The terminal (merge/close) exits and the one-time idle ping are specified in "Terminal exits + one-time idle ping" below, the explicit delivery-PR-only invariant in "Delivery-PR-only invariant", and the resilience rules (best-effort Slack, GitHub backoff, concurrency lockfile) in "Resilience" — each is defined exactly once in those subsections and not duplicated here.
+
+**Cycle ordering (where the later steps slot in).** A single cycle, in order: **acquire the concurrency lock** (Resilience below) → **check terminal exits** (merge / close-unmerged — Terminal exits below; if either fired, post the closing Slack reply, release the lock, and stop) → **fetch + bot-filter + dedupe** → **reply / apply** → **idle-ping check** (Terminal exits below) → **update `review_loop.monitoring` state** → **return next-wake guidance and release the lock**. The fetch, reply/apply, and the three Slack posts are all wrapped by the resilience rules below (best-effort Slack, transient-GitHub backoff).
 
 ##### Fetch + bot-filter + dedupe new human comments (Task 11)
 
@@ -441,7 +443,45 @@ When the author makes an **unambiguous selection** (exactly one valid token, per
 
 **Discuss path.** If the author's reply is "discuss" (ambiguous/absent token, or a comment that asks a question rather than selecting), do **not** apply anything: reply with reasoning / a re-prompt (routed through the **Outbound redaction chokepoint**) and **keep the entry in `awaiting_choice`**, so the loop keeps offering the choice on subsequent cycles until the author picks an unambiguous option.
 
-The merge/close terminal exits, the one-time idle ping, the explicit delivery-PR-only invariant statement, and the resilience rules (best-effort Slack with retry-once, transient-GitHub backoff, and the per-workspace concurrency lockfile) are layered onto this loop by later tasks; this step does not duplicate them.
+##### Terminal exits + one-time idle ping (Task 14)
+
+These run **once per cycle** against the **delivery** PR only. They reuse the existing `exit_reason = "delivered"` — **no new `exit_reason` value is introduced** by any branch here.
+
+**Terminal exits — check before fetching comments.** Read the delivery PR's state (`gh pr view <review_loop.delivery.pr_number> --json state,merged`). Two terminal conditions stop the loop for good (a closed delivery PR must **never** keep polling forever):
+
+- **Merged.** If the delivery PR is **merged**, post a **closing Slack reply** to the configured thread (`review_loop.monitoring.channel_id` / `thread_ts`) noting the delivery PR landed, then **stop the loop**: leave `review_loop.status = "complete"` and `review_loop.exit_reason = "delivered"` (the delivery step already set these — this is a **reuse**, not a new exit reason). Release the concurrency lock (Resilience below) and return without scheduling another wake.
+- **Closed without merging.** If the delivery PR is **closed but not merged**, post a **closing Slack reply** noting it was closed unmerged, then **stop the loop** the same way (status `complete`, `exit_reason = "delivered"` — still reused; the cap/close distinction is carried by `review_loop.delivery.*`, not by a new exit reason). Release the lock and return without scheduling another wake. The loop **MUST NOT** continue polling a closed delivery PR.
+
+Both closing replies are assembled and routed through the **Outbound redaction chokepoint** (last step before the send) and are **best-effort** per Resilience below — a failed closing post never prevents the loop from stopping.
+
+**One-time idle ping — check after processing comments.** Fire a **single** Slack heads-up to the thread when the delivery PR has gone quiet, gated so it neither re-fires every cycle nor never fires:
+
+- **Fire condition:** `now − review_loop.monitoring.last_activity_at ≥ review_loop.monitoring.idle_deadline_minutes` **AND** `review_loop.monitoring.idle_pinged == false`. (Default `idle_deadline_minutes = 30`, overridable via `--idle` — the resolved value persisted in state. If `last_activity_at` is `null` — no human comment handled yet — there is no idle window to measure against, so do not fire.)
+- **On fire:** post the idle heads-up (through the **Outbound redaction chokepoint**, **best-effort**), then set `review_loop.monitoring.idle_pinged = true` and persist it. Because the flag is persisted, the ping does **not** re-fire on the next cycle even though the loop is re-entrant across fresh-context restarts.
+- **Reset on activity:** whenever a **new human comment** is processed in a cycle (per the fetch/apply steps above), set `review_loop.monitoring.idle_pinged = false` and update `review_loop.monitoring.last_activity_at` to that comment's time. The reset re-arms the one-time ping for the next idle window. (The apply-fix step already updates `last_activity_at`; this restates that the same activity clears `idle_pinged`.) Persisting both fields is what makes the ping survive process restarts — it fires exactly once per idle window rather than every cycle or never.
+
+##### Delivery-PR-only invariant (Task 15)
+
+**Invariant (non-negotiable) — the monitoring loop acts on the DELIVERY PR / branch ONLY.** Every read, poll, comment, reaction, thread resolve, and push the monitoring loop performs targets the delivery PR and its branch, sourced exclusively from `review_loop.delivery.*` (`pr_number`, `pr_url`, `branch`). The loop **MUST NOT** poll, comment, react, resolve, or push on the **TARGET** PR (`stages.pr.*`) under **any** circumstance — including the obvious careless case of **replying on the target PR thread where a human commented**. A human comment may have originated on the target PR; the loop still answers **only on the delivery PR**, never by replying on the target PR.
+
+Concretely, for the monitoring loop:
+
+- **Reads / polls** the delivery PR's comments and state via `review_loop.delivery.pr_number` — never `stages.pr.number` / `stages.pr.url`.
+- **Comments / replies / reacts** (multiple-choice prompts, discuss re-prompts) only on the delivery PR. No `gh pr comment`, `gh api .../comments`, or `gh api .../replies` against the target PR.
+- **Resolves** are recorded in the workspace records under `<WS>/` (the stacked-mode analogue), **never** as a `resolveReviewThread` / `unresolveReviewThread` mutation on the target PR.
+- **Pushes** only `review_loop.delivery.branch`; never the target PR's head branch.
+
+This restates and anchors the stacked-mode no-mutation invariant (already enforced for the convergence loop and the stacked fix-subagent contract above) **specifically for the interactive monitoring surface**, so the comment-driven loop cannot drift into touching the target PR. The target PR remains **provably untouched** across the entire interactive flow — exactly as in plain `--stacked`.
+
+##### Resilience (Task 16)
+
+The monitoring loop degrades gracefully under flaky Slack, transient GitHub failures, and concurrent invocations. None of these rules introduce a new `stage` or `exit_reason`.
+
+- **Slack posts are best-effort — never abort the loop or a fix.** Every Slack post the interactive flow makes — the **pre-review**, the **post-delivery**, and the **idle / closing** posts — is best-effort: if a send fails, **retry once**, then **continue**. A failed Slack post **never** aborts a poll cycle, a fix, or a terminal exit, and is **never** treated as a reason to stop. (A post withheld by the fail-closed redaction chokepoint is treated the same way for loop-continuity — it never aborts the cycle — but, unlike a transport failure, it always surfaces a heads-up to the human; see the chokepoint above.)
+- **Transient GitHub errors skip the cycle with backoff — a fetch failure is NOT "no new comments".** If a GitHub call (comment fetch, PR-state read, or push) fails with a **transient** error (rate limit, network, 5xx), **skip the current cycle** and return next-wake guidance with **backoff** (wait longer than the normal `poll_minutes` before the next attempt). A failed fetch **MUST NOT** be interpreted as "no new comments" — the loop makes **no** state changes (does not advance `handled_comment_ids`, does not fire the idle ping, does not record activity) on a failed fetch, so transient errors can never cause a comment to be silently dropped or the idle timer to be mis-driven. The next cycle re-fetches from the same persisted state.
+- **Concurrency guard — a per-workspace lockfile.** Two concurrent `/feature-review … --interactive` loops on the **same** PR share the `_pr-<N>` workspace and would otherwise **double-post** (two multiple-choice replies to one comment) or **double-apply** (two fix commits for one selection). Guard with a **per-workspace lockfile** under `.claude/features/_pr-<N>/` (e.g. `.claude/features/_pr-<N>/monitoring.lock`):
+  - **Acquire on cycle entry.** Before doing any cycle work, attempt to create the lockfile atomically. **If the lock is already held**, do **not** run a cycle: exit immediately with a clear message — `A monitoring loop is already running for #<N>.` — and make **no** posts or fixes.
+  - **Release on exit / abort.** Release the lock (remove the lockfile) when the cycle returns normally **and** on any abort or terminal exit (merge / close-unmerged), so a stopped or crashed-out loop does not strand the lock and block the next legitimate invocation. Best-effort and transient-skip cycles also release the lock on return.
 
 ### ⏸ Human checkpoint 2
 
