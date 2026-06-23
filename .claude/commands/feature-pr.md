@@ -13,7 +13,7 @@ You are running **stage 4 (open PR)** of the agentic feature workflow for ticket
 
    > No feature branch with commits found for `<TICKET>`. Run `/feature-implement <TICKET>` first or check out the branch manually.
 
-3. **Invoke the conductor** with `TICKET=<ticket>`, `start_stage=pr`, and `mode=only` (or `continue` if the flag was passed). The conductor seeds upstream stages as complete and dispatches the PR-open subagent.
+3. **Call the `feature-flow-conductor` skill** (via the **Skill tool**) with `TICKET=<ticket>`, `start_stage=pr`, and `mode=only` (or `continue` if the flag was passed). The conductor seeds upstream stages as complete and dispatches the PR-open subagent.
 
 4. **Report result**: surface the PR URL to the user. In `only` mode, suggest `/feature-review <TICKET>` as the next step.
 
