@@ -65,7 +65,13 @@
             },
             "exit_reason": {
               "type": ["string", "null"],
-              "enum": ["clean", "unpushable", "max_rounds_exhausted", "delivered", null],
+              "enum": [
+                "clean",
+                "unpushable",
+                "max_rounds_exhausted",
+                "delivered",
+                null
+              ],
               "description": "How the loop exited. In-place mode (`review_mode = 'in_place'`) uses 'clean': will_fix empty, PR ready to merge; 'unpushable': head branch is on a fork or otherwise un-pushable, will-fix surfaced as a punch list; 'max_rounds_exhausted': hit max_rounds with unresolved will-fix, in modes where we own the branch the user can still choose to iterate. Stacked mode (`review_mode = 'stacked'`) uses 'delivered': the loop finished (cleanly OR after hitting the round cap) and the separate delivery PR was opened — the target PR was never mutated. Whether the cap was hit is conveyed by `delivery.capped`, NOT by a separate exit reason. Null while the loop is in progress."
             },
             "delivery": {
@@ -107,6 +113,99 @@
               "type": ["array", "null"],
               "items": { "type": "string" },
               "description": "Allowlist whose meaning depends on `review_mode`. In `in_place` mode it holds GraphQL review-thread node IDs that actually belong to this PR, populated by pr-review-orchestrator's pre-flight from `pullRequest.reviewThreads`. In `stacked` mode it instead holds workspace finding ids (the `id` field of each entry in `<WS>/findings.json`), populated from that file — the key name is kept for schema continuity across modes. In both modes, reviewer Step A, pr-triage, and the fix subagent MUST validate every id against this allowlist before acting on it (in_place: before calling resolveReviewThread / unresolveReviewThread; stacked: before applying a finding) — otherwise a compromised subagent could mutate threads or apply findings from an unrelated PR/run in the same org."
+            },
+            "monitoring": {
+              "type": ["object", "null"],
+              "default": null,
+              "description": "Interactive stacked-review only (`review_mode = 'stacked'` plus the `--interactive` flag). Durable bookkeeping for the Slack-coordinated, comment-driven monitoring loop on the delivery PR. Null in `in_place` mode and in plain `--stacked` runs; every field is nullable/defaulted so existing states validate unchanged. Not in `required`. The loop reuses `bot_identity` (above) to filter the agent's own comments — no separate field. All loop state persists here so the re-entrant, one-cycle-per-invocation poll loop survives process restarts and resumes from persisted state.",
+              "properties": {
+                "channel_id": {
+                  "type": ["string", "null"],
+                  "description": "Slack channel ID extracted from the `archives/<ID>` segment of the thread permalink by the conductor. Null until extracted (or if unextractable — target validity is proven by access, not format)."
+                },
+                "thread_ts": {
+                  "type": ["string", "null"],
+                  "description": "Slack thread timestamp extracted from the permalink's trailing `p<digits>` token (decimal inserted 6 digits from the end) or a `thread_ts` query parameter. Null until extracted."
+                },
+                "poll_minutes": {
+                  "type": "integer",
+                  "default": 5,
+                  "description": "Minutes between monitoring poll cycles. Resolved from the `--poll` flag overriding this default; persisted so a resumed loop keeps the same cadence."
+                },
+                "idle_deadline_minutes": {
+                  "type": "integer",
+                  "default": 30,
+                  "description": "Minutes of inactivity after which a one-time idle Slack heads-up fires. Resolved from the `--idle` flag overriding this default; persisted so a resumed loop keeps the same cadence."
+                },
+                "last_activity_at": {
+                  "type": ["string", "null"],
+                  "format": "date-time",
+                  "description": "Timestamp of the last handled human comment. Updated when a new human comment is processed; drives the idle-deadline check. Null until the first activity."
+                },
+                "idle_pinged": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "True once the one-time idle heads-up has been posted for the current idle window. Reset to false when a new human comment arrives, so the ping survives restarts without re-firing every cycle or never firing."
+                },
+                "handled_comment_ids": {
+                  "type": "array",
+                  "items": { "type": "integer" },
+                  "description": "GitHub comment IDs already processed by the loop. New comments are deduped against this list each cycle. Edit detection does NOT live here (this stays a bare integer list for backward compatibility) — the edit baseline for each handled comment is the parallel `handled_comment_hashes` map: an edited handled comment is detected when its live body hash differs from the recorded hash, and re-opened as unselected rather than silently skipped."
+                },
+                "handled_comment_hashes": {
+                  "type": ["object", "null"],
+                  "default": null,
+                  "description": "Edit-detection baseline for handled comments: a map from GitHub comment ID (as a string key) to the content hash of that comment's body captured when the comment was handled (its fix landed). Parallel to `handled_comment_ids` rather than reshaping it, so existing states with a bare `handled_comment_ids` list still validate. Each cycle re-hashes a handled comment's live body and compares it to the stored value here; a mismatch means the comment was edited after it was handled, so the edited-comment re-open rule re-opens it. Null/absent before the first comment is handled; an entry is added when a comment's id is added to `handled_comment_ids`, and removed in lockstep with that id when an already-handled comment is edited and re-opened (the edited-comment re-open rule clears the comment from BOTH `handled_comment_ids` and this map so it becomes a pure `awaiting_choice` entry again — the handled-XOR-awaiting invariant: a comment is recorded as handled OR tracked by an open awaiting entry, never both).",
+                  "additionalProperties": { "type": "string" }
+                },
+                "awaiting_choice": {
+                  "type": "array",
+                  "description": "Comments that have been replied to with multiple-choice options and are awaiting an unambiguous author selection. A selection is recognized only when exactly one valid token, under that entry's UNIQUE `reply_token_prefix`, is present in a reply authored by `commenter_login` (the original commenter); the unique prefix lets one author hold several open entries at once and select among them by distinct token. An open entry's `comment_id` is also excluded from re-prompting by the dedupe step (unless the comment was edited, in which case the edited-comment re-open rule supersedes the drop), so an unanswered prompt is not re-posted every poll cycle. Each entry carries a `content_hash` baseline (the comment body hash captured when its prompt was posted): the edit-detection step compares the live body hash against this stored value to tell an edited awaiting comment from an unedited one, and the hash is also folded into `reply_token_prefix` so a re-opened entry gets a token distinct from the original.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "comment_id",
+                      "commenter_login",
+                      "options",
+                      "reply_token_prefix",
+                      "content_hash"
+                    ],
+                    "properties": {
+                      "comment_id": {
+                        "type": "integer",
+                        "description": "GitHub comment ID of the original human comment this awaiting-choice entry tracks (the comment that was prompted, NOT the selection reply). A later reply is matched back to this entry either by `in_reply_to_id` / review-thread linkage (inline review surface) or by this entry's unique `reply_token_prefix` (no-linkage issue-comment surface)."
+                      },
+                      "commenter_login": {
+                        "type": "string",
+                        "description": "GitHub login of the human who authored the original comment. Author binding: a selection token is accepted ONLY from a reply authored by this login (else treated as 'discuss'), so a third party cannot trigger an auto-fix + push on a public delivery PR. Mirrors the `bot_identity` spoofing defense."
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "The concrete multiple-choice options posted for the comment author to select from."
+                      },
+                      "content_hash": {
+                        "type": "string",
+                        "description": "Edit-detection baseline for this awaiting comment: the content hash of the original comment's body captured when this prompt was posted. Each cycle re-hashes the comment's live body and compares it to this stored value; a mismatch means the comment was edited while awaiting a selection, so the edited-comment re-open rule re-opens it (replacing this entry's prompt with a fresh one) rather than letting the dedupe drop starve it. Also folded into `reply_token_prefix` so a re-opened (edited) entry gets a token distinct from the original."
+                      },
+                      "reply_token_prefix": {
+                        "type": "string",
+                        "description": "Token prefix that prefixes each posted option, UNIQUE per awaiting_choice entry — derive it from BOTH this entry's `comment_id` AND its `content_hash` (e.g. a short id of `comment_id`+`content_hash`, like `option a1b2c3d4:`). The `comment_id` component keeps it unique across distinct entries (no cross-entry collision); the `content_hash` component makes a re-opened entry for the SAME comment_id (after an edit) derive a DIFFERENT prefix than the original, so the stale original token can never satisfy the re-opened entry and the author is forced to re-select. A reply must contain exactly one valid token under this prefix to be a selection. Because the prefix is unique per entry, that single token resolves to exactly one open entry regardless of how many the author has open, so there is no shared-token ambiguity or starvation."
+                      }
+                    }
+                  }
+                },
+                "ignored_bot_authors": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "default": [],
+                  "description": "Configurable GitHub logins to skip when fetching new comments (in addition to `user.type == 'Bot'` and the agent's own `bot_identity`). Defaults to empty; bot logins are configured per project, never baked into core prose."
+                },
+                "github_to_slack_handles": {
+                  "type": ["object", "null"],
+                  "description": "Best-effort map from GitHub username to Slack user ID (e.g. `U01ABC234`, the form a connector needs to render a real @-mention — not an `@handle`) for @-mentioning the PR author. Null when no mapping is configured; if absent or missing an entry, post the GitHub username as plain text with no @-mention — never block the loop on a missing mapping."
+                }
+              }
             }
           },
           "required": ["status", "round", "max_rounds", "rounds"]

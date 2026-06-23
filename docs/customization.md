@@ -103,6 +103,47 @@ The conductor's Stage 4 specifies `Title format: <TICKET>: <brief title>`. To us
 1. Override `feature-flow-conductor/SKILL.md` at `.claude/skills/`.
 2. Adjust the title and body template in Stage 4.
 
+## 9. Interactive review (poll, idle, and the Slack connector)
+
+`--interactive` adds Slack coordination and a comment-driven fix loop to a stacked review. It is opt-in and only valid with `--stacked` plus a Slack thread permalink. See [workflow-guide.md § Interactive stacked review](./workflow-guide.md#interactive-stacked-review) for the full behavior; the knobs below are what you configure.
+
+### The Slack connector is optional
+
+The Slack MCP connector is an **optional, runtime-only** dependency, required for `--interactive` only. The plugin stays installable and fully usable without it — plain `--stacked` and every other flow add **zero** Slack dependency. The connector is probed at runtime in the conductor (not at command parse time) before the first Slack post; if none is configured, the interactive run fails fast there with the verbatim message:
+
+> `--interactive requires a Slack thread permalink (e.g. https://your.slack.com/archives/C…/p…). None was supplied.`
+
+This message is reused for the no-connector case, so it reads like a missing-argument error even when you _did_ supply a permalink — if you see it despite passing a valid Slack thread URL, the real cause is that no Slack MCP connector is configured. To enable interactive review, install any Slack MCP server in the consuming environment — the conductor discovers it at runtime and references no specific connector tool name.
+
+### Cadence — `--poll` / `--idle`
+
+The monitoring loop runs one poll cycle per invocation (continuity comes from an external scheduler — cron, `/loop`, or a scheduled-task equivalent). Two flags override the cadence defaults persisted in `review_loop.monitoring`:
+
+| Flag           | State field                        | Default |
+| -------------- | ---------------------------------- | ------- |
+| `--poll <min>` | `monitoring.poll_minutes`          | `5`     |
+| `--idle <min>` | `monitoring.idle_deadline_minutes` | `30`    |
+
+The flag value overrides the default, and the resolved value is persisted so a resumed loop keeps the same cadence. To change the defaults globally, edit them in a project-scoped `feature-flow-conductor/SKILL.md` override; to change per-run, pass the flags (or edit `state.json:review_loop.monitoring` before the loop starts).
+
+### Ignored bot authors
+
+`review_loop.monitoring.ignored_bot_authors` is a configurable list of GitHub logins the monitoring loop skips when scanning the delivery PR for new human comments (default `[]`). Comments from `user.type == "Bot"` and from the agent's own login (`review_loop.bot_identity`) are always skipped automatically; this list is for **human-typed** bot-style accounts you want ignored.
+
+```jsonc
+// in .claude/features/_pr-<N>/state.json, under review_loop.monitoring
+"ignored_bot_authors": ["coderabbitai[bot]"] // EXAMPLE — replace with your own review-bot logins; default is []
+```
+
+### GitHub → Slack handle map
+
+`review_loop.monitoring.github_to_slack_handles` maps a PR author's GitHub login to a Slack **user ID** (e.g. `U01ABC234`, not an `@handle`) for the pre-review @-mention (nullable; default `null`). A user ID is what the connector needs to render a real @-mention. If the map is absent or has no entry for the author, the loop posts the plain GitHub username with no @-mention — it never blocks the loop on a missing mapping.
+
+```jsonc
+// in .claude/features/_pr-<N>/state.json, under review_loop.monitoring
+"github_to_slack_handles": { "octocat": "U01EXAMPLE" } // EXAMPLE — map your GitHub logins to Slack user IDs
+```
+
 ---
 
 ## What you cannot customize (by design)
@@ -110,4 +151,4 @@ The conductor's Stage 4 specifies `Title format: <TICKET>: <brief title>`. To us
 - The 2-checkpoint structure. Adding or removing human checkpoints fundamentally changes the workflow contract; it's not parameterized.
 - The fresh-context per-stage model. Stages are isolated subagents intentionally — see [workflow-guide.md § Token-optimization design](./workflow-guide.md#token-optimization-design-why-the-workflow-looks-like-this).
 - The verify-script contract (markers, exit codes, --quick mode). The skill assumes them; breaking them breaks the workflow.
-- The 6-stage shape. Stacked-pr review mode (`--stacked`) is a *mode* of the existing review loop (Stage 5), selected by the `review_loop.review_mode` discriminator — not a new stage. It reuses the same lanes, triage, and `scripts/verify.sh` gate, and adds no new required dependencies (just the `gh` CLI the loop already uses). The non-invasive guarantee (target PR provably untouched) and the separate delivery PR are part of the mode's contract, not knobs.
+- The 6-stage shape. Stacked-pr review mode (`--stacked`) is a _mode_ of the existing review loop (Stage 5), selected by the `review_loop.review_mode` discriminator — not a new stage. It reuses the same lanes, triage, and `scripts/verify.sh` gate, and adds no new required dependencies (just the `gh` CLI the loop already uses). The non-invasive guarantee (target PR provably untouched) and the separate delivery PR are part of the mode's contract, not knobs. `--interactive` is likewise a flag layered onto Stage 5 (Slack posts + a comment-driven monitoring loop on the delivery PR), not a new stage — the cadence and the bot-author / handle-map knobs above are the only customizable parts; the delivery-PR-only invariant and the fail-closed outbound redaction are part of the contract, not knobs.
