@@ -11,12 +11,12 @@ You are running **stage 1 (brief)** of the agentic feature workflow for ticket: 
 
 2. **Set up workspace**: ensure `.claude/features/<TICKET>/` exists. If `state.json` already exists, this is a re-run of the brief stage — proceed (the conductor will overwrite).
 
-3. **Invoke the conductor** with `TICKET=<ticket>`, `start_stage=brief`, and `mode=only` (or `continue` if the flag was passed).
+3. **Call the `feature-flow-conductor` skill** (via the **Skill tool**) with `TICKET=<ticket>`, `start_stage=brief`, and `mode=only` (or `continue` if the flag was passed).
 
 4. **Surface human checkpoint 1**: when the conductor returns at the brief checkpoint, use `AskUserQuestion` with options _Approved_ / _Needs revisions_ / _Cancel_. In `only` mode, stop after the human responds — do not advance to plan.
 
 ## Constraints
 
 - Do not implement code in this turn.
-- Do not read brief contents yourself — the conductor delegates to a subagent.
+- Do not read brief contents yourself — the conductor's brief subagent does that in fresh context.
 - If the user passed `--continue`, behave like `/feature` from this point onward.

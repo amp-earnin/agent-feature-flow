@@ -48,7 +48,7 @@ Argument: **$ARGUMENTS**
 
      > PR #`<N>` is not available (state: `<state or "not found">`). Aborting.
 
-3. **Invoke the conductor** with `start_stage=review_loop`, `mode=only`, and either:
+3. **Call the `feature-flow-conductor` skill** (via the **Skill tool**) with `start_stage=review_loop`, `mode=only`, and either:
    - Ticket mode: `TICKET=<ticket>` — the conductor seeds upstream stages as complete using the existing brief and PR. `review_mode=in_place` (the default; ticket runs are always in-place).
    - PR mode: `PR=<number>` (no TICKET). The conductor handles workspace seeding, PR-context persistence, branch-ownership detection, and the review loop. Pass `review_mode=stacked` when the `--stacked` flag was parsed in step 1; otherwise `review_mode=in_place` (the default).
 
@@ -63,7 +63,7 @@ Argument: **$ARGUMENTS**
 
    In `review_mode=stacked` the loop runs at full fidelity but **never mutates the target PR** (no comments, no commits to its head): the reviewer↔triage↔fixer loop coordinates entirely in the workspace, and the agreed fixes are delivered as a separate, reviewable PR. The conductor owns all of that behavior — this command only selects the mode.
 
-4. **Surface human checkpoint 2**: when the conductor returns, dispatch on `review_loop.exit_reason`:
+4. **Surface human checkpoint 2**: when the conductor returns, branch on `review_loop.exit_reason`:
 
    **In-place exit reasons** (`review_mode=in_place` — unchanged):
    - `"clean"`: loop converged. Options: _Merge_ / _Iterate_ / _Abandon_.

@@ -15,7 +15,7 @@ You are running **stage 3 (implement)** of the agentic feature workflow for tick
 
    If either is missing, stop and tell the user which file is missing and that they should run the upstream stage (`/feature-brief` or `/feature-plan`) or write the file themselves.
 
-3. **Invoke the conductor** with `TICKET=<ticket>`, `start_stage=implement`, and `mode=only` (or `continue` if the flag was passed). The conductor seeds `state.json` (brief + plan marked complete) before dispatching per-task subagents.
+3. **call the `feature-flow-conductor` skill** (via the **Skill tool**) with `TICKET=<ticket>`, `start_stage=implement`, and `mode=only` (or `continue` if the flag was passed). The conductor seeds `state.json` (brief + plan marked complete) before it dispatches the per-task subagents.
 
 4. **Report result**: emit a one-line summary of tasks completed and the branch name. In `only` mode, suggest `/feature-pr <TICKET>` as the next step.
 
